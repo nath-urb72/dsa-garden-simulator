@@ -24,19 +24,10 @@ const topicTemplates = {
   1: {
     title: "Python OOP + Big O + Stacks",
     code: `# Topic 1: Python OOP + Big O + Stacks
-#
-# A stack is LIFO (last in, first out). Python's list already behaves like one
-# if you only ever add/remove from the SAME end - append() is "push", pop() is
-# "pop", both at the end of the list, which we treat as the "top" of the stack.
-#
-# This is now a pure ACTION LOG, not an undo mechanism: once planted, watered,
-# harvested or shoveled, an action cannot be reversed - only recorded. Every
-# operation below is still O(1), because a log only ever grows from one end.
 
 class GameAction:
     def __init__(self, label):
         self.label = label
-
 
 class ActionHistoryStack:
     def __init__(self):
@@ -57,7 +48,6 @@ class ActionHistoryStack:
     def size(self):   # O(1)
         return len(self.action_stack)
 
-
 if "stack" not in globals():
     stack = ActionHistoryStack()
 
@@ -68,17 +58,15 @@ print("Every planting, watering, harvest and shovel use is logged here permanent
   2: {
     title: "Queues & Deques (FIFO Elements)",
     code: `# Topic 2: Queues & Deques (FIFO Elements)
-# (unchanged from before - included so Topics 1-4 can run as one block)
 
 import random
 from collections import deque
 
 HAZARD_TABLE = {
     "Drought":     {"water": -30},
-    "Melting Ice": {"energy": -20},
-    "Flood":       {"seeds": -10},
+    "Snowstorm": {"energy": -20},
+    "Drizzle":       {"seeds": -10},
 }
-
 
 class ClimateEvent:
     def __init__(self, name, effects):
@@ -110,7 +98,7 @@ class ClimateQueue():
 
 if "q" not in globals():
     q = ClimateQueue()
-    for hazard in ("Drought", "Melting Ice", "Flood"):
+    for hazard in ("Drought", "Snowstorm", "Drizzle"):
         q.add_challenge(hazard)
 
 q.refresh_display()
@@ -120,16 +108,6 @@ print("Climate Queue (FIFO) ready!")
   3: {
     title: "Static/Dynamic Arrays, 2D Lists, & Memory Structures",
     code: `# Topic 3: Static/Dynamic Arrays, 2D Lists, & Memory Structures
-#
-# - Dynamic array: game.catalog is a list that grows with append() (amortized O(1))
-#   as new plants unlock. PLANT_DATA is a hash table (dict) keyed by plant name,
-#   giving O(1) average lookup for every plant's stats.
-# - Static-style array: the garden grid is allocated once at a fixed size (5 x 5).
-# - 2D list: a list of row lists. grid[row][col] is an O(1) lookup.
-# - Memory layout: the UI's 25 tiles are ONE flat sequence, so a (row, col) pair
-#   maps to a flat position with   pos = row * cols + col   (row-major order).
-#
-# This topic uses \`stack\` (Topic 1) and \`q\` (Topic 2), so run Topics 1 -> 2 -> 3.
 
 def _require(*names):
     missing = [name for name in names if name not in globals()]
@@ -637,37 +615,11 @@ print("Pick a tool (Plant / Water / Harvest / Shovel) and click a tile in the In
   4: {
     title: "Hierarchical Trees & Traversals",
     code: `# Topic 4: Hierarchical Trees & Traversals
-#
-# A tree is a hierarchy of nodes: one ROOT, and every other node has exactly one
-# parent and any number of children. This tree mirrors the color-tier chain from
-# Topic 3's PLANT_DATA:
-#
-#   Plant Book
-#   |-- RED (tier)
-#   |   |-- Tomato, Apple, ...          <- RED's own plants
-#   |   |-- ORANGE (tier)               <- a SUB-tier, opens after RED
-#   |   |   '-- Carrot, Tangerine
-#   |   '-- YELLOW (tier)               <- a SUB-tier, opens after RED
-#   |       '-- Corn, Banana, ...
-#   |-- GREEN (tier)
-#   |   |-- Lettuce, Cucumber, ...
-#   |   '-- BLUE_VIOLET (tier)
-#   |       |-- Grapes, Sweet Potato, ...
-#   |       '-- PINK (tier)
-#   |           '-- Chrysanthemum, Tulip, ...
-#   '-- BROWN (tier)
-#       '-- Potato, Onion, Garlic, Coconut
-#
-# Three ways to visit every node (each O(n), n = number of nodes):
-#   - Preorder:    a node first, then its children       -> builds the Plant Book rows
-#   - Postorder:   a node's children first, then itself  -> counts unlocked plants per tier
-#   - Level-order: one level at a time (uses a queue)    -> prints the book layer by layer
 
 from collections import deque
 
 if "game" not in globals():
     raise RuntimeError("Run the earlier topics first (Topic 3 sets up PLANT_DATA and the garden). Missing: game")
-
 
 class PlantNode:
     def __init__(self, label, emoji=None, is_plant=False, plant_name=None):
@@ -714,16 +666,14 @@ class PlantNode:
                 waiting.append((depth + 1, child))
         return levels
 
-
-def _build_tier_node(color):
-    node = PlantNode(color)
-    for name in TIER_ORDER[color]:
-        node.add_child(PlantNode(name, PLANT_DATA[name]["emoji"], is_plant=True, plant_name=name))
-    for other_color, meta in COLOR_CHAINS.items():
-        if meta["opens_after"] == color:
-            node.add_child(_build_tier_node(other_color))
-    return node
-
+    def _build_tier_node(color):
+        node = PlantNode(color)
+        for name in TIER_ORDER[color]:
+            node.add_child(PlantNode(name, PLANT_DATA[name]["emoji"], is_plant=True, plant_name=name))
+        for other_color, meta in COLOR_CHAINS.items():
+            if meta["opens_after"] == color:
+                node.add_child(_build_tier_node(other_color))
+        return node
 
 class PlantBook:
     def __init__(self, game):
@@ -780,7 +730,6 @@ class PlantBook:
             lines.append(f"Level {depth}: " + ", ".join(labels))
         print("Plant Book, level by level:\\n" + "\\n".join(lines) + "\\n")
 
-
 plant_book = PlantBook(game)
 plant_book.render()
 plant_book.print_levels()
@@ -792,29 +741,9 @@ print(f"Plant Book ready! {unlocked} of {total} plants unlocked. Open the Plant 
   5: {
     title: "Binary Search Trees (BST) & Node Mutation",
     code: `# Topic 5: Binary Search Trees (BST) & Node Mutation
-#
-# A BST is a binary tree with ONE rule: at every node, everything in its LEFT
-# subtree is smaller, everything in its RIGHT subtree is larger (or equal, here -
-# see the tie-breaking note below). That one rule is what makes all three
-# traversals below do something genuinely useful, not just "visit every node":
-#
-#   - Inorder   (left, node, right)  -> visits nodes in ASCENDING cost order.
-#                                        This is the BST's whole point: sorting
-#                                        falls out of the shape for free.
-#   - Preorder  (node, left, right)  -> visits a node BEFORE its subtrees. Replaying
-#                                        inserts in this exact order rebuilds the
-#                                        identical tree shape - it's a backup sequence.
-#   - Postorder (left, right, node)  -> visits a node AFTER its subtrees. This is the
-#                                        safe order to tear a tree down: you only ever
-#                                        discard a node once both its children are gone.
-#
-# Average time: O(log n) for insert/search, because each comparison discards
-# one whole subtree. WORST CASE: O(n), if the tree degenerates into a straight
-# chain - watch for this below, it happens almost immediately with our own data.
 
 if "game" not in globals():
     raise RuntimeError("Run the earlier topics first (Topic 3 sets up PLANT_DATA and the garden). Missing: game")
-
 
 class PriceNode:
     def __init__(self, cost, name):
@@ -822,7 +751,6 @@ class PriceNode:
         self.name = name
         self.left = None
         self.right = None
-
 
 class PlantPriceBST:
     """Every unlocked plant, ordered by cost. Ties (two plants at the same cost)
@@ -888,13 +816,11 @@ class PlantPriceBST:
             return 0
         return 1 + max(self._height(node.left), self._height(node.right))
 
-
 def _rebuild_price_bst():
     tree = PlantPriceBST()
     for plant in game.catalog:   # inserted in catalog order: unlock order, not sorted order
         tree.insert(plant.cost, plant.name)
     return tree
-
 
 price_bst = _rebuild_price_bst()
 
