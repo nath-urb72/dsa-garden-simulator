@@ -36,34 +36,37 @@ print("Every planting, watering, harvest and shovel use is logged here permanent
 import random
 from collections import deque
 
-HAZARD_TABLE = {
-    "Drought":     {"water": -30},
-    "Snowstorm": {"energy": -20},
-    "Drizzle":       {"seeds": -10},
+# Each event is either a straight resource change ("resource"), or an ACTION
+# that does something to the garden itself ("water_plants"). Not every event
+# is bad - Drizzle is a genuine benefit.
+EVENT_TABLE = {
+    "Drought":   {"kind": "resource",     "effects": {"water": -30}},
+    "Snowstorm": {"kind": "resource",     "effects": {"seeds": -10}},
+    "Drizzle":   {"kind": "water_plants", "count": 3},
 }
 
 class ClimateEvent:
-    def __init__(self, name, effects):
+    def __init__(self, name, data):
         self.name = name
-        self.effects = effects
+        self.data = data   # the EVENT_TABLE entry: {"kind": ..., ...}
 
 
 class ClimateQueue():
     def __init__(self):
         self.queue = deque()
 
-    def add_challenge(self, event_name):   # O(1): enqueue at the back
-        self.queue.append(ClimateEvent(event_name, HAZARD_TABLE[event_name]))
+    def add_event(self, event_name):   # O(1): enqueue at the back
+        self.queue.append(ClimateEvent(event_name, EVENT_TABLE[event_name]))
         print(f"Successfully added {event_name}!\n")
         self.refresh_display()
 
-    def process_hazard(self):   # O(1): dequeue from the front
+    def process_next_event(self):   # O(1): dequeue from the front
         if len(self.queue) == 0:
             print("Empty queue!\n")
             return None
         event = self.queue.popleft()
         print(f"Processed {event.name}\n")
-        self.add_challenge(random.choice(list(HAZARD_TABLE)))
+        self.add_event(random.choice(list(EVENT_TABLE)))   # keep the forecast full
         return event
 
     def refresh_display(self):
@@ -72,14 +75,16 @@ class ClimateQueue():
 
 if "q" not in globals():
     q = ClimateQueue()
-    for hazard in ("Drought", "Snowstorm", "Drizzle"):
-        q.add_challenge(hazard)
+    for event_name in ("Drought", "Snowstorm", "Drizzle"):
+        q.add_event(event_name)
 
 q.refresh_display()
-print("Climate Queue (FIFO) ready!")
+print("Climate Queue (FIFO) ready! Events are drawn 0-2 per day when the day ends, not every day.")
 
 # ===== TOPIC 3 =====
 # Topic 3: Static/Dynamic Arrays, 2D Lists, & Memory Structures
+
+import random
 
 def _require(*names):
     missing = [name for name in names if name not in globals()]
@@ -97,9 +102,15 @@ COLOR_CHAINS = {
     "ORANGE":       {"chain": "RED",   "depth": 1, "opens_after": "RED"},
     "YELLOW":       {"chain": "RED",   "depth": 1, "opens_after": "RED"},
     "GREEN":        {"chain": "GREEN", "depth": 0, "opens_after": None},
-    "BLUE_VIOLET":  {"chain": "GREEN", "depth": 1, "opens_after": "GREEN"},
-    "PINK":         {"chain": "GREEN", "depth": 2, "opens_after": "BLUE_VIOLET"},
+    "VIOLET":  {"chain": "GREEN", "depth": 1, "opens_after": "GREEN"},
+    "PINK":         {"chain": "GREEN", "depth": 2, "opens_after": "VIOLET"},
     "BROWN":        {"chain": "BROWN", "depth": 0, "opens_after": None},
+}
+
+# One colored heart per tier, used by the Plant Book instead of a generic icon.
+COLOR_HEART = {
+    "RED": "❤️", "ORANGE": "🧡", "YELLOW": "💛", "GREEN": "💚",
+    "VIOLET": "💜", "PINK": "💗", "BROWN": "🤎",
 }
 
 # Harvests of the PREVIOUS plant in the same tier needed to unlock the next one.
@@ -110,7 +121,7 @@ TIER_ORDER = {
     "ORANGE":      ["Carrot", "Tangerine"],
     "YELLOW":      ["Corn", "Banana", "Lemon", "Sunflower", "Mango"],
     "GREEN":       ["Lettuce", "Cucumber", "Bell Pepper", "Broccoli", "Avocado"],
-    "BLUE_VIOLET": ["Grapes", "Sweet Potato", "Eggplant", "Blueberry"],
+    "VIOLET": ["Grapes", "Sweet Potato", "Eggplant", "Blueberry"],
     "PINK":        ["Chrysanthemum", "Tulip", "Peach", "Hibiscus", "Cherry Blossom"],
     "BROWN":       ["Potato", "Onion", "Garlic", "Coconut"],
 }
@@ -223,7 +234,7 @@ class Resources:
 
 
 class GardenGrid:
-    def __init__(self, rows=10, cols=10):
+    def __init__(self, rows=7, cols=7):
         self.rows = rows
         self.cols = cols
         self.cells = [[None] * cols for _ in range(rows)]
@@ -305,8 +316,9 @@ class Market:
 
 
 class GardenGame:
-    HAZARD_EVERY = 3
-    MAX_STAMINA = 500
+    # 7x7 = 49 tiles. Stamina is set so a water-only day can cover about half
+    # the garden (24 waterings at 10 stamina each = 240; rounded to 250).
+    MAX_STAMINA = 250
     STAMINA_COSTS = {"plant": 15, "water": 10, "harvest": 10, "shovel": 10}
     WATER_COST = 10   # Water resource spent per use of the watering can
     SEEDS_PER_PLANT = 1
@@ -315,7 +327,6 @@ class GardenGame:
         self.catalog = catalog
         self.resources = resources
         self.grid = grid or GardenGrid()
-        self.plants_since_hazard = 0
         self.stamina = self.MAX_STAMINA
         self.day = 1
         self.harvest_counts = {}   # name -> lifetime harvest count, used to unlock the next plant
@@ -337,14 +348,16 @@ class GardenGame:
     def spend_stamina(self, action):
         cost = self.STAMINA_COSTS[action]
         if self.stamina < cost:
-            return "Too tired for that today. End the day to rest."
+            return "😴 Too tired for that today. Sell your harvest, then press End Day when ready."
         self.stamina -= cost
         self.sync_stamina()
         return None
 
-    def _maybe_auto_end_day(self):
+    def _tired_notice(self):
+        """Stamina hitting 0 no longer force-ends the day - it just tells the
+        player, who can keep selling to the market and chooses when to rest."""
         if self.stamina <= 0:
-            return self.end_day()
+            return "😴 You're exhausted for today! Sell what you've harvested, then press End Day when you're ready."
         return None
 
     # ---- the four tile actions ----
@@ -369,10 +382,8 @@ class GardenGame:
         self.grid.place(row, col, prototype.clone())
         stack.push_action(f"Planted {prototype.name} at ({row}, {col})")
 
-        hazard_msg = self.trigger_hazard_if_due()
         self.resources.sync()
-        end_msg = self._maybe_auto_end_day()
-        return end_msg or hazard_msg or f"Planted {prototype.name}."
+        return self._tired_notice() or f"Planted {prototype.name}."
 
     def water_at(self, row, col):
         if not self.grid.in_bounds(row, col):
@@ -395,8 +406,7 @@ class GardenGame:
         self.grid.redraw(row, col)
         stack.push_action(f"Watered {plant.name} at ({row}, {col})")
         self.resources.sync()
-        end_msg = self._maybe_auto_end_day()
-        return end_msg or f"Watered {plant.name} - now {plant.stage}."
+        return self._tired_notice() or f"Watered {plant.name} - now {plant.stage}."
 
     def harvest_at(self, row, col):
         if not self.grid.in_bounds(row, col):
@@ -422,8 +432,7 @@ class GardenGame:
             names = ", ".join(f"{PLANT_DATA[n]['emoji']} {n}" for n in newly_unlocked)
             message += f" Unlocked: {names}!"
 
-        end_msg = self._maybe_auto_end_day()
-        return end_msg or message
+        return self._tired_notice() or message
 
     def shovel_at(self, row, col):
         if not self.grid.in_bounds(row, col):
@@ -437,22 +446,36 @@ class GardenGame:
 
         self.grid.remove(row, col)
         stack.push_action(f"Removed {plant.name} at ({row}, {col}) with the shovel")
-        end_msg = self._maybe_auto_end_day()
-        return end_msg or f"Removed the {plant.name}. No refund."
+        return self._tired_notice() or f"Removed the {plant.name}. No refund."
 
-    # ---- hazards (unchanged trigger, still tied to planting) ----
-    def trigger_hazard_if_due(self):
-        self.plants_since_hazard += 1
-        if self.plants_since_hazard < self.HAZARD_EVERY:
-            return None
-        self.plants_since_hazard = 0
-        event = q.process_hazard()
-        if event is None:
-            return None
-        for resource, change in event.effects.items():
-            self.resources.change(resource, change)
-        summary = ", ".join(f"{change:+d} {resource}" for resource, change in event.effects.items())
-        return f"{event.name} hit the garden! ({summary})"
+    # ---- daily events: 0-2 drawn from the Climate Queue when the day ends,
+    # not tied to planting, and not guaranteed every day ----
+    def process_daily_events(self):
+        messages = []
+        for _ in range(random.randint(0, 2)):
+            event = q.process_next_event()
+            if event is not None:
+                messages.append(self.apply_event(event))
+        return messages
+
+    def apply_event(self, event):
+        data = event.data
+        if data["kind"] == "resource":
+            for resource, change in data["effects"].items():
+                self.resources.change(resource, change)
+            summary = ", ".join(f"{change:+d} {resource}" for resource, change in data["effects"].items())
+            return f"{event.name}! ({summary})"
+        if data["kind"] == "water_plants":
+            candidates = [(r, c, p) for r, c, p in self.grid.each_plant() if p.stage != "mature"]
+            random.shuffle(candidates)
+            watered = 0
+            for row, col, plant in candidates[:data["count"]]:
+                plant.growth_progress = min(plant.grow_days, plant.growth_progress + 1)
+                plant.update_stage()
+                self.grid.redraw(row, col)
+                watered += 1
+            return f"{event.name}! Automatically watered {watered} plant(s)."
+        return f"{event.name} happened."
 
     # ---- unlocking: harvest counts drive the color-tier chain from Topic 4 ----
     def check_unlocks(self):
@@ -508,13 +531,16 @@ class GardenGame:
             plant.grow_one_day()
             self.grid.redraw(row, col)
 
+        event_messages = self.process_daily_events()
+        for msg in event_messages:
+            stack.push_action(msg)
+
         earned = self.market.payout()
         if earned:
             self.resources.change("coins", earned)
 
         self.day += 1
         self.stamina = self.MAX_STAMINA
-        self.plants_since_hazard = 0
 
         self.resources.sync()
         self.sync_stamina()
@@ -524,6 +550,8 @@ class GardenGame:
 
         stack.push_action(f"Day ended - Day {self.day} begins")
         message = f"Day {self.day} begins. Everyone is rested."
+        if event_messages:
+            message += " " + " ".join(event_messages)
         if earned:
             message += f" Market payout: +{earned} coins."
         return message
@@ -686,7 +714,8 @@ class PlantBook:
                 rows.append((depth - 1, node.emoji, node.label, unlocked, note))
             else:
                 unlocked, total = node.tally(unlocked_names)
-                rows.append((depth - 1, "🎨", f"{node.label} Tier", True, f"{unlocked}/{total} unlocked (incl. sub-tiers)"))
+                heart = COLOR_HEART.get(node.label, "🎨")
+                rows.append((depth - 1, heart, f"{node.label} Tier", True, f"{unlocked}/{total} unlocked (incl. sub-tiers)"))
         return rows
 
     def render(self):

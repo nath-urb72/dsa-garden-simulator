@@ -6,7 +6,7 @@
 // PATCH: bug fix or small tweak with no new feature
 // Use 0.x.y while in development; move to 1.0.0 once all 11 topics are complete.
 // =====================================================================
-const APP_VERSION = "0.9.0";
+const APP_VERSION = "1.0.0";
 
 let pyodideInstance = null;
 let gardenPlants = {};
@@ -139,16 +139,16 @@ const STAGE_ICON = { seed: "🌱", sprout: "🌿" };
 function renderGarden() {
   const grid = document.getElementById("garden-grid");
   grid.innerHTML = "";
-  for (let i = 0; i < 100; i++) {
+  for (let i = 0; i < 49; i++) {
     const cell = document.createElement("div");
     const entry = gardenPlants[i];
     const mature = entry && entry.stage === "mature";
-    cell.className = "aspect-square rounded-md flex items-center justify-center text-base border cursor-pointer transition-colors select-none " +
+    cell.className = "aspect-square rounded-lg flex items-center justify-center text-2xl border cursor-pointer transition-colors select-none " +
       (mature ? "bg-[#2a3825] border-emerald-600 hover:border-emerald-400" : entry ? "bg-[#232f1f] border-emerald-900 hover:border-emerald-500" : "bg-[#2a3825] border-emerald-800 hover:border-emerald-400");
     cell.textContent = entry ? (entry.stage === "mature" ? (plantEmoji[entry.name] || "🌱") : STAGE_ICON[entry.stage] || "🌱") : "⬜";
     if (entry) cell.title = `${entry.name} (${entry.stage})`;
-    // 5 tiles per row: flat position i  <->  (row, col)
-    cell.addEventListener("click", () => handleTileClick(Math.floor(i / 10), i % 10));
+    // 7 tiles per row: flat position i  <->  (row, col)
+    cell.addEventListener("click", () => handleTileClick(Math.floor(i / 7), i % 7));
     grid.appendChild(cell);
   }
 }
@@ -208,35 +208,27 @@ function sellToMarket(name) {
 // updateResources(water, seeds, energy, hope, coins)
 // Or pass a single object: updateResources({"water": n, "seeds": n, ...})
 // No fallbacks that turn a valid 0 into a default. Caps used only for bar width.
+// Energy and Hope still arrive here (Python keeps tracking them for later use;
+// see changes.md) but are no longer drawn - only Water, Seeds and Coins are shown.
 function updateResources(water, seeds, energy, hope, coins) {
   if (typeof water === "object" && water !== null) {
     const args = water;
-    water  = args.water  !== undefined ? args.water  : 0;
-    seeds  = args.seeds  !== undefined ? args.seeds  : 0;
-    energy = args.energy !== undefined ? args.energy : 0;
-    hope   = args.hope   !== undefined ? args.hope   : 0;
-    coins  = args.coins  !== undefined ? args.coins  : 0;
+    water = args.water !== undefined ? args.water : 0;
+    seeds = args.seeds !== undefined ? args.seeds : 0;
+    coins = args.coins !== undefined ? args.coins : 0;
   } else {
-    water  = water  !== undefined ? water  : 0;
-    seeds  = seeds  !== undefined ? seeds  : 0;
-    energy = energy !== undefined ? energy : 0;
-    hope   = hope   !== undefined ? hope   : 0;
-    coins  = coins  !== undefined ? coins  : 0;
+    water = water !== undefined ? water : 0;
+    seeds = seeds !== undefined ? seeds : 0;
+    coins = coins !== undefined ? coins : 0;
   }
 
-  const waterMax = 200, seedsMax = 100, energyMax = 120, hopeMax = 100;
+  const waterMax = 200, seedsMax = 100;
 
   document.getElementById("water-text").innerText = `${water} / ${waterMax} L`;
   document.getElementById("water-bar").style.width = `${Math.min(100, (water / waterMax) * 100)}%`;
 
   document.getElementById("seeds-text").innerText = `${seeds} / ${seedsMax}`;
   document.getElementById("seeds-bar").style.width = `${Math.min(100, (seeds / seedsMax) * 100)}%`;
-
-  document.getElementById("energy-text").innerText = `${energy} / ${energyMax} Wh`;
-  document.getElementById("energy-bar").style.width = `${Math.min(100, (energy / energyMax) * 100)}%`;
-
-  document.getElementById("hope-text").innerText = `${hope} / ${hopeMax}`;
-  document.getElementById("hope-bar").style.width = `${Math.min(100, (hope / hopeMax) * 100)}%`;
 
   document.getElementById("coins-text").innerText = `${coins} Coins`;
 }
@@ -360,7 +352,7 @@ function renderActionStack() {
   [...displayActionHistory].reverse().forEach(act => {
     const div = document.createElement("div");
     div.className = "bg-emerald-950/60 border-l-2 border-amber-500 px-3 py-2 rounded text-xs text-emerald-100";
-    div.textContent = `→ ${act}`;
+    div.textContent = act;
     container.appendChild(div);
   });
 }
@@ -421,7 +413,7 @@ function loadTopic() {
 }
 
 function switchTab(tab) {
-  ["game", "code", "book", "inventory"].forEach(name => {
+  ["game", "code", "book", "inventory", "market"].forEach(name => {
     const button = document.getElementById("tab-" + name);
     document.getElementById("view-" + name).classList.toggle("hidden", tab !== name);
     button.classList.toggle("bg-[#283623]", tab === name);
