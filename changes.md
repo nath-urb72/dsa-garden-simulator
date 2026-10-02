@@ -6,6 +6,7 @@ Updates needed:
 - Remove the arrow -> on every Action History in the Stack
 - Make the plot 7x7
 - BLUE_VIOLET should only be called VIOLET
+- Traversal and BST features
 
 Queue Revamp:
 - Each Event gives some type of benefit/disadvantage to the player (for example, drizzle automatically waters some plants in the plot.)
