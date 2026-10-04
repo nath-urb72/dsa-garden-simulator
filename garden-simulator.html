@@ -25,6 +25,13 @@ body {
   border: 1px solid rgba(120, 143, 114, 0.2);
   box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
 }
+
+/* Traversal Compare rows (state classes are toggled from script-test.js) */
+.tv-row { transition: opacity .2s, box-shadow .2s, background-color .2s; }
+.tv-row.unvisited { opacity: .25; }
+.tv-row.unvisited .tv-num { visibility: hidden; }
+.tv-row.current { box-shadow: 0 0 0 2px #fcd34d; background-color: #3b4a2a; }
+.tv-row.linked { box-shadow: 0 0 0 2px #38bdf8; opacity: 1; }
 </style>
 </head>
 <body class="min-h-screen p-4 flex flex-col justify-between overflow-x-hidden">
@@ -130,8 +137,40 @@ body {
           </div>
           <span id="plant-book-count" class="text-xs font-bold text-emerald-300 bg-emerald-950/50 border border-emerald-800/60 px-3 py-1 rounded-full">0 / 0 unlocked</span>
         </div>
-        <p id="plant-book-empty" class="text-sm text-emerald-300/80">Run Topic 4 in the Student Code Editor to fill the Plant Book.</p>
-        <div id="plant-book-list" class="space-y-2"></div>
+        <div id="plant-book-mode" class="flex bg-[#192218] p-1 rounded-xl border border-emerald-800/40 w-fit mb-4">
+          <button onclick="setPlantBookMode('book')" id="pbmode-book" class="px-3 py-1.5 rounded-lg text-xs font-bold bg-[#283623] text-emerald-100">📖 Book</button>
+          <button onclick="setPlantBookMode('compare')" id="pbmode-compare" class="px-3 py-1.5 rounded-lg text-xs font-bold text-emerald-400/80 hover:text-emerald-100">🌳 Traversal Compare</button>
+        </div>
+
+        <div id="plant-book-standard">
+          <p id="plant-book-empty" class="text-sm text-emerald-300/80">Run Topic 4 in the Student Code Editor to fill the Plant Book.</p>
+          <div id="plant-book-list" class="space-y-2"></div>
+        </div>
+
+        <div id="plant-book-compare" class="hidden">
+          <p id="traversal-empty" class="text-sm text-emerald-300/80">Run Topic 4 in the Student Code Editor to build the Plant Book tree first.</p>
+          <div id="traversal-body" class="hidden">
+            <p class="text-xs text-emerald-300/90 mb-3">The same Plant Book tree, visited four ways. Press Play to watch all four walk it together, or hover any node to see where it lands in each order. <span class="text-emerald-400/70">(Demo only. Nothing here affects the game.)</span></p>
+            <div class="flex flex-wrap items-center gap-2 mb-2">
+              <button id="traversal-play" onclick="toggleTraversalPlay()" class="px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white">▶ Play</button>
+              <button onclick="stepTraversal()" class="px-3 py-1.5 rounded-lg text-xs font-bold bg-[#2a3825] hover:bg-[#34462e] border border-emerald-700 text-emerald-200">Step ⏭</button>
+              <button onclick="resetTraversal()" class="px-3 py-1.5 rounded-lg text-xs font-bold bg-[#2a3825] hover:bg-[#34462e] border border-emerald-700 text-emerald-200">↺ Reset</button>
+              <select id="traversal-speed" onchange="changeTraversalSpeed()" class="bg-[#1b2219] border border-emerald-700 text-emerald-100 text-xs rounded-lg px-2 py-1.5">
+                <option value="800">Slow</option>
+                <option value="450" selected>Normal</option>
+                <option value="180">Fast</option>
+              </select>
+              <span id="traversal-step-label" class="ml-auto text-xs font-bold text-emerald-300">Visited 0 / 0</span>
+            </div>
+            <input id="traversal-slider" type="range" min="0" max="0" value="0" oninput="scrubTraversal(this.value)" class="w-full accent-emerald-500 mb-2">
+            <p id="traversal-now" class="text-[11px] text-emerald-200/90 mb-2 min-h-[1.25rem]"></p>
+            <div id="traversal-legend" class="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-emerald-300/80 mb-2"></div>
+            <div id="traversal-scroll" class="relative max-h-[460px] overflow-y-auto pr-1">
+              <div id="traversal-grid" class="grid grid-cols-4 gap-2"></div>
+            </div>
+            <p class="text-[11px] text-emerald-300/70 mt-3">The Plant Book is an n-ary tree (a tier can have many children), so in-order is generalized: first child's subtree → the node → the remaining children. On a binary tree that is exactly left → node → right.</p>
+          </div>
+        </div>
       </div>
 
   <div id="view-inventory" class="glass-panel rounded-2xl p-6 min-h-[380px] hidden">

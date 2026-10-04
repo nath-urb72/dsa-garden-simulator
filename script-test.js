@@ -6,7 +6,7 @@
 // PATCH: bug fix or small tweak with no new feature
 // Use 0.x.y while in development; move to 1.0.0 once all 11 topics are complete.
 // =====================================================================
-const APP_VERSION = "1.0.0";
+const APP_VERSION = "1.1.0";
 
 let pyodideInstance = null;
 let gardenPlants = {};
@@ -18,11 +18,12 @@ let displayActionHistory = [];
 
 // =====================================================================
 // TOPIC TEMPLATES — titles live here; the Python for each topic lives in
-// garden_topics.py (one file, split by "# ===== TOPIC n =====" markers) and is
+// garden-topics.py (one file, split by "# ===== TOPIC n =====" markers) and is
 // loaded into the `code` fields by loadTopicCode() on startup.
 // Call the bridge functions from your Python to update the UI.
 // =====================================================================
-const TOPICS_PY_URL = "garden_topics.py";
+const TOPICS_PY_URL = "garden-topics.py";
+let topicLoadError = ""; // shown in the editor if the fetch fails (the output console gets overwritten by initPyodide)
 
 const topicTemplates = {
   1: { title: "Python OOP + Big O + Stacks", code: "" },
@@ -38,7 +39,7 @@ const topicTemplates = {
   11: { title: "Dynamic Programming (DP), Memoization, & Divide-and-Conquer", code: "" }
 };
 
-// Fetches garden_topics.py and fills topicTemplates[n].code for each topic.
+// Fetches garden-topics.py and fills topicTemplates[n].code for each topic.
 async function loadTopicCode() {
   const response = await fetch(TOPICS_PY_URL, { cache: "no-store" });
   if (!response.ok) throw new Error(`Could not load ${TOPICS_PY_URL} (HTTP ${response.status})`);
@@ -68,6 +69,7 @@ async function initPyodide() {
     pyodideInstance.globals.set("pushAction", pushAction);
     pyodideInstance.globals.set("updateClimateQueue", updateClimateQueue);
     pyodideInstance.globals.set("renderPlantBook", renderPlantBook);
+    pyodideInstance.globals.set("renderTraversalCompare", renderTraversalCompare);
     pyodideInstance.globals.set("updateStamina", updateStamina);
     pyodideInstance.globals.set("updateDay", updateDay);
     pyodideInstance.globals.set("updateInventory", updateInventory);
@@ -288,6 +290,220 @@ function renderPlantBook(rows, unlockedCount, totalCount) {
   });
 }
 
+// =====================================================================
+// TRAVERSAL COMPARE (demo only - display only, no game logic)
+// Python (PlantBook.traversal_orders) does the traversals; this only draws them.
+// =====================================================================
+const TRAVERSAL_PANELS = [
+  { key: "bfs",       short: "BFS",  title: "BFS · Level-order", hint: "Level by level · Queue",  accent: "text-sky-300" },
+  { key: "preorder",  short: "Pre",  title: "DFS · Pre-order",   hint: "Node → children",         accent: "text-emerald-300" },
+  { key: "inorder",   short: "In",   title: "DFS · In-order",    hint: "1st child → node → rest", accent: "text-emerald-300" },
+  { key: "postorder", short: "Post", title: "DFS · Post-order",  hint: "Children → node",         accent: "text-emerald-300" }
+];
+const DEPTH_COLORS = ["#fbbf24", "#34d399", "#38bdf8", "#c084fc", "#fb7185", "#a3e635", "#f472b6"];
+
+let plantBookMode = "book";   // "book" | "compare"
+let traversalData = null;     // { bfs, preorder, inorder, postorder }: lists of [depth, emoji, name, unlocked, isPlant]
+let traversalCells = [];      // traversalCells[panel][i] -> the row element for that panel's i-th visited node
+let traversalStep = 0;        // how many nodes each traversal has visited so far
+let traversalTimer = null;
+
+// renderTraversalCompare(bfs, preorder, inorder, postorder)
+// Each argument: list of [depth, emoji, name, unlocked, isPlant], already in visit order.
+function renderTraversalCompare(bfs, preorder, inorder, postorder) {
+  // Python proxies die when this call returns, and the animation needs the data later: copy to plain JS.
+  const copy = rows => (rows && typeof rows.toJs === "function") ? rows.toJs() : rows;
+  const next = { bfs: copy(bfs), preorder: copy(preorder), inorder: copy(inorder), postorder: copy(postorder) };
+  const total = next.bfs.length;
+  const wasComplete = !traversalData || traversalStep >= traversalData.bfs.length;
+  traversalData = next;
+  traversalStep = wasComplete ? total : Math.min(traversalStep, total);   // keep your place if the book re-renders mid-play
+  document.getElementById("traversal-empty").classList.add("hidden");
+  document.getElementById("traversal-body").classList.remove("hidden");
+  buildTraversalGrid();
+  applyTraversalStep();
+}
+
+function buildTraversalGrid() {
+  const grid = document.getElementById("traversal-grid");
+  grid.innerHTML = "";
+  traversalCells = [];
+  let maxDepth = 0;
+
+  TRAVERSAL_PANELS.forEach(panel => {
+    const col = document.createElement("div");
+    col.className = "min-w-0";
+
+    const head = document.createElement("div");
+    head.className = "tv-head sticky top-0 z-10 h-11 px-2 py-1 mb-1 rounded-lg bg-[#192218] border border-emerald-800/60";
+    const title = document.createElement("div");
+    title.className = "text-[11px] font-extrabold truncate " + panel.accent;
+    title.textContent = panel.title;
+    const hint = document.createElement("div");
+    hint.className = "text-[10px] text-emerald-300/70 truncate";
+    hint.textContent = panel.hint;
+    head.title = `${panel.title}: ${panel.hint}`;
+    head.appendChild(title);
+    head.appendChild(hint);
+    col.appendChild(head);
+
+    const cells = [];
+    traversalData[panel.key].forEach(([depth, emoji, name, unlocked, isPlant], i) => {
+      maxDepth = Math.max(maxDepth, depth);
+      const row = document.createElement("div");
+      row.className = "tv-row unvisited flex items-center gap-1 h-7 px-1.5 mb-1 rounded-md border text-[11px] " +
+        (isPlant ? "bg-[#1b2219] border-emerald-900 text-emerald-50" : "bg-[#2a3825] border-emerald-700 font-bold text-white");
+      row.dataset.key = name;
+      row.title = `#${i + 1} ${name} (depth ${depth}${unlocked ? "" : ", locked"})`;
+      row.style.borderLeftWidth = "4px";
+      row.style.borderLeftColor = DEPTH_COLORS[depth % DEPTH_COLORS.length];
+
+      const num = document.createElement("span");
+      num.className = "tv-num w-5 shrink-0 text-right text-[10px] font-bold tabular-nums text-amber-300";
+      num.textContent = i + 1;
+      const icon = document.createElement("span");
+      icon.className = "shrink-0 text-sm leading-none" + (unlocked ? "" : " grayscale");
+      icon.textContent = emoji;
+      const label = document.createElement("span");
+      label.className = "truncate min-w-0" + (unlocked ? "" : " text-emerald-200/60");
+      label.textContent = name;
+
+      row.appendChild(num);
+      row.appendChild(icon);
+      row.appendChild(label);
+      col.appendChild(row);
+      cells.push(row);
+    });
+    traversalCells.push(cells);
+    grid.appendChild(col);
+  });
+
+  // Legend: the left stripe on every row is its depth in the tree.
+  const legend = document.getElementById("traversal-legend");
+  legend.innerHTML = "<span>Left stripe = depth:</span>";
+  for (let d = 0; d <= maxDepth; d++) {
+    const item = document.createElement("span");
+    item.className = "flex items-center gap-1";
+    const swatch = document.createElement("span");
+    swatch.className = "inline-block w-2.5 h-2.5 rounded-sm";
+    swatch.style.backgroundColor = DEPTH_COLORS[d % DEPTH_COLORS.length];
+    item.appendChild(swatch);
+    item.appendChild(document.createTextNode(d === 0 ? "root" : `level ${d}`));
+    legend.appendChild(item);
+  }
+
+  // Hover any node to light it up in all four lists.
+  grid.onmouseover = e => highlightLinked(e.target.closest(".tv-row"));
+  grid.onmouseout = () => highlightLinked(null);
+}
+
+function highlightLinked(row) {
+  const key = row ? row.dataset.key : null;
+  traversalCells.forEach(cells => cells.forEach(r => r.classList.toggle("linked", key !== null && r.dataset.key === key)));
+}
+
+function applyTraversalStep() {
+  if (!traversalData) return;
+  const total = traversalData.bfs.length;
+  traversalCells.forEach(cells => cells.forEach((row, i) => {
+    row.classList.toggle("unvisited", i >= traversalStep);
+    row.classList.toggle("current", traversalStep > 0 && traversalStep < total && i === traversalStep - 1);
+  }));
+
+  document.getElementById("traversal-step-label").textContent = `Visited ${traversalStep} / ${total}`;
+  const slider = document.getElementById("traversal-slider");
+  slider.max = total;
+  slider.value = traversalStep;
+
+  const now = document.getElementById("traversal-now");
+  if (traversalStep === 0) {
+    now.textContent = "Nothing visited yet. Press Play or Step.";
+  } else if (traversalStep >= total) {
+    now.textContent = `All ${total} nodes visited: same tree, four different orders.`;
+  } else {
+    now.textContent = `Step ${traversalStep}: ` +
+      TRAVERSAL_PANELS.map(p => `${p.short} → ${traversalData[p.key][traversalStep - 1][2]}`).join("  ·  ");
+  }
+  scrollTraversalIntoView();
+}
+
+// Rows have a fixed height, so row i lines up across all four lists: scroll them together.
+function scrollTraversalIntoView() {
+  const total = traversalData.bfs.length;
+  if (traversalStep < 1 || traversalStep >= total) return;
+  const wrap = document.getElementById("traversal-scroll");
+  const row = traversalCells[0][traversalStep - 1];
+  const head = wrap.querySelector(".tv-head");
+  const headH = head ? head.offsetHeight : 0;
+  const top = row.offsetTop, bottom = top + row.offsetHeight;
+  if (top < wrap.scrollTop + headH) wrap.scrollTop = Math.max(0, top - headH - 4);
+  else if (bottom > wrap.scrollTop + wrap.clientHeight) wrap.scrollTop = bottom - wrap.clientHeight + 4;
+}
+
+function toggleTraversalPlay() {
+  if (traversalTimer) { pauseTraversal(); return; }
+  if (!traversalData) return;
+  if (traversalStep >= traversalData.bfs.length) traversalStep = 0;   // finished? replay from the start
+  applyTraversalStep();
+  startTraversalTimer();
+}
+
+function startTraversalTimer() {
+  const delay = Number(document.getElementById("traversal-speed").value);
+  traversalTimer = setInterval(() => {
+    stepTraversal(true);
+    if (traversalStep >= traversalData.bfs.length) pauseTraversal();
+  }, delay);
+  document.getElementById("traversal-play").textContent = "⏸ Pause";
+}
+
+function pauseTraversal() {
+  if (traversalTimer) clearInterval(traversalTimer);
+  traversalTimer = null;
+  const button = document.getElementById("traversal-play");
+  if (button) button.textContent = "▶ Play";
+}
+
+function changeTraversalSpeed() {
+  if (!traversalTimer) return;
+  clearInterval(traversalTimer);
+  startTraversalTimer();
+}
+
+function stepTraversal(fromTimer) {
+  if (!traversalData) return;
+  if (!fromTimer) pauseTraversal();
+  const total = traversalData.bfs.length;
+  traversalStep = traversalStep >= total ? 1 : traversalStep + 1;   // stepping past the end wraps to the start
+  applyTraversalStep();
+}
+
+function resetTraversal() {
+  pauseTraversal();
+  traversalStep = 0;
+  applyTraversalStep();
+}
+
+function scrubTraversal(value) {
+  pauseTraversal();
+  traversalStep = Number(value);
+  applyTraversalStep();
+}
+
+// Plant Book view toggle: the normal book vs. the traversal comparison.
+function setPlantBookMode(mode) {
+  plantBookMode = mode;
+  document.getElementById("plant-book-standard").classList.toggle("hidden", mode !== "book");
+  document.getElementById("plant-book-compare").classList.toggle("hidden", mode !== "compare");
+  [["book", "pbmode-book"], ["compare", "pbmode-compare"]].forEach(([name, id]) => {
+    const button = document.getElementById(id);
+    button.classList.toggle("bg-[#283623]", mode === name);
+    button.classList.toggle("text-emerald-100", mode === name);
+    button.classList.toggle("text-emerald-400/80", mode !== name);
+  });
+  if (mode !== "compare") pauseTraversal();
+}
+
 // updateStamina(current, max)
 function updateStamina(current, max) {
   document.getElementById("stamina-text").innerText = `${current} / ${max}`;
@@ -409,10 +625,24 @@ async function runAllTopics() {
 
 function loadTopic() {
   const key = document.getElementById("topic-selector").value;
-  document.getElementById("code-editor").value = topicTemplates[key].code;
+  const editor = document.getElementById("code-editor");
+  if (topicTemplates[key].code) {
+    editor.value = topicTemplates[key].code;
+  } else if (topicLoadError) {
+    editor.value =
+      `# COULD NOT LOAD ${TOPICS_PY_URL}\n# Reason: ${topicLoadError}\n#\n` +
+      `# 1) If the address bar starts with file://, the browser blocks fetch().\n` +
+      `#    Serve the folder instead: run  python -m http.server  in it,\n` +
+      `#    then open http://localhost:8000/garden-simulator.html\n` +
+      `# 2) Check the filename matches exactly (hyphen vs underscore): ${TOPICS_PY_URL}\n` +
+      `# 3) Keep the .html, .js and .py files in the same folder.`;
+  } else {
+    editor.value = `# No code found for Topic ${key} in ${TOPICS_PY_URL}.\n# Check that it has a line:  # ===== TOPIC ${key} =====`;
+  }
 }
 
 function switchTab(tab) {
+  if (tab !== "book") pauseTraversal();
   ["game", "code", "book", "inventory", "market"].forEach(name => {
     const button = document.getElementById("tab-" + name);
     document.getElementById("view-" + name).classList.toggle("hidden", tab !== name);
@@ -441,9 +671,9 @@ window.onload = async () => {
   try {
     await loadTopicCode();
   } catch (err) {
-    document.getElementById("output-console").innerHTML =
-      `<span class="text-red-400">Failed to load ${TOPICS_PY_URL}: ${err.message}. ` +
-      `Serve the folder over http (e.g. "python -m http.server") instead of opening the .html file directly.</span>`;
+    topicLoadError = err.message;
+    console.error("loadTopicCode failed:", err);
+    showToast("Could not load " + TOPICS_PY_URL + " - open the Student Code Editor tab for details.");
   }
   loadTopic();
   switchTab("game");
