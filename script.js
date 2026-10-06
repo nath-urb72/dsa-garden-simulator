@@ -6,7 +6,7 @@
 // PATCH: bug fix or small tweak with no new feature
 // Use 0.x.y while in development; move to 1.0.0 once all 11 topics are complete.
 // =====================================================================
-const APP_VERSION = "0.9.0";
+const APP_VERSION = "1.1.0";
 
 let pyodideInstance = null;
 let gardenPlants = {};
@@ -17,879 +17,41 @@ let plantEmoji = {};
 let displayActionHistory = [];
 
 // =====================================================================
-// TOPIC TEMPLATES — paste your Python for each topic into the matching entry.
+// TOPIC TEMPLATES — titles live here; the Python for each topic lives in
+// garden-topics.py (one file, split by "# ===== TOPIC n =====" markers) and is
+// loaded into the `code` fields by loadTopicCode() on startup.
 // Call the bridge functions from your Python to update the UI.
 // =====================================================================
+const TOPICS_PY_URL = "garden-topics.py";
+let topicLoadError = ""; // shown in the editor if the fetch fails (the output console gets overwritten by initPyodide)
+
 const topicTemplates = {
-  1: {
-    title: "Python OOP + Big O + Stacks",
-    code: `# Topic 1: Python OOP + Big O + Stacks
-
-class GameAction:
-    def __init__(self, label):
-        self.label = label
-
-class ActionHistoryStack:
-    def __init__(self):
-        self.action_stack = []   # the END of the list is the TOP of the stack
-
-    def push_action(self, label):   # O(1) amortized
-        self.action_stack.append(GameAction(label))
-        pushAction(label)   # bridge: show the label in the Action History panel
-
-    def peek(self):   # O(1): look at the most recent action without removing it
-        if self.is_empty():
-            return None
-        return self.action_stack[-1]
-
-    def is_empty(self):   # O(1)
-        return len(self.action_stack) == 0
-
-    def size(self):   # O(1)
-        return len(self.action_stack)
-
-if "stack" not in globals():
-    stack = ActionHistoryStack()
-
-print(f"Action History Stack ready! ({stack.size()} action(s) recorded)\\n")
-print("Every planting, watering, harvest and shovel use is logged here permanently.")
-`
-  },
-  2: {
-    title: "Queues & Deques (FIFO Elements)",
-    code: `# Topic 2: Queues & Deques (FIFO Elements)
-
-import random
-from collections import deque
-
-HAZARD_TABLE = {
-    "Drought":     {"water": -30},
-    "Snowstorm": {"energy": -20},
-    "Drizzle":       {"seeds": -10},
-}
-
-class ClimateEvent:
-    def __init__(self, name, effects):
-        self.name = name
-        self.effects = effects
-
-
-class ClimateQueue():
-    def __init__(self):
-        self.queue = deque()
-
-    def add_challenge(self, event_name):   # O(1): enqueue at the back
-        self.queue.append(ClimateEvent(event_name, HAZARD_TABLE[event_name]))
-        print(f"Successfully added {event_name}!\\n")
-        self.refresh_display()
-
-    def process_hazard(self):   # O(1): dequeue from the front
-        if len(self.queue) == 0:
-            print("Empty queue!\\n")
-            return None
-        event = self.queue.popleft()
-        print(f"Processed {event.name}\\n")
-        self.add_challenge(random.choice(list(HAZARD_TABLE)))
-        return event
-
-    def refresh_display(self):
-        updateClimateQueue([event.name for event in self.queue])
-
-
-if "q" not in globals():
-    q = ClimateQueue()
-    for hazard in ("Drought", "Snowstorm", "Drizzle"):
-        q.add_challenge(hazard)
-
-q.refresh_display()
-print("Climate Queue (FIFO) ready!")
-`
-  },
-  3: {
-    title: "Static/Dynamic Arrays, 2D Lists, & Memory Structures",
-    code: `# Topic 3: Static/Dynamic Arrays, 2D Lists, & Memory Structures
-
-def _require(*names):
-    missing = [name for name in names if name not in globals()]
-    if missing:
-        raise RuntimeError("Run the earlier topics first (1 = Stack, 2 = Queue). Missing: " + ", ".join(missing))
-
-_require("stack", "q")
-
-
-# =====================================================================
-# MASTER PLANT DATA (a dict = a hash table: O(1) average lookup by name)
-# =====================================================================
-
-COLOR_CHAINS = {
-    "RED":          {"chain": "RED",   "depth": 0, "opens_after": None},
-    "ORANGE":       {"chain": "RED",   "depth": 1, "opens_after": "RED"},
-    "YELLOW":       {"chain": "RED",   "depth": 1, "opens_after": "RED"},
-    "GREEN":        {"chain": "GREEN", "depth": 0, "opens_after": None},
-    "BLUE_VIOLET":  {"chain": "GREEN", "depth": 1, "opens_after": "GREEN"},
-    "PINK":         {"chain": "GREEN", "depth": 2, "opens_after": "BLUE_VIOLET"},
-    "BROWN":        {"chain": "BROWN", "depth": 0, "opens_after": None},
-}
-
-# Harvests of the PREVIOUS plant in the same tier needed to unlock the next one.
-UNLOCK_THRESHOLDS = [None, 10, 40, 140, 500]
-
-TIER_ORDER = {
-    "RED":         ["Tomato", "Apple", "Strawberry", "Chili Pepper", "Cherry"],
-    "ORANGE":      ["Carrot", "Tangerine"],
-    "YELLOW":      ["Corn", "Banana", "Lemon", "Sunflower", "Mango"],
-    "GREEN":       ["Lettuce", "Cucumber", "Bell Pepper", "Broccoli", "Avocado"],
-    "BLUE_VIOLET": ["Grapes", "Sweet Potato", "Eggplant", "Blueberry"],
-    "PINK":        ["Chrysanthemum", "Tulip", "Peach", "Hibiscus", "Cherry Blossom"],
-    "BROWN":       ["Potato", "Onion", "Garlic", "Coconut"],
-}
-
-_EMOJI = {
-    "Tomato": "🍅", "Apple": "🍎", "Strawberry": "🍓", "Chili Pepper": "🌶️", "Cherry": "🍒",
-    "Carrot": "🥕", "Tangerine": "🍊",
-    "Corn": "🌽", "Banana": "🍌", "Lemon": "🍋", "Sunflower": "🌻", "Mango": "🥭",
-    "Lettuce": "🥬", "Cucumber": "🥒", "Bell Pepper": "🫑", "Broccoli": "🥦", "Avocado": "🥑",
-    "Grapes": "🍇", "Sweet Potato": "🍠", "Eggplant": "🍆", "Blueberry": "🫐",
-    "Chrysanthemum": "💮", "Tulip": "🌷", "Peach": "🍑", "Hibiscus": "🌺", "Cherry Blossom": "🌸",
-    "Potato": "🥔", "Onion": "🧅", "Garlic": "🧄", "Coconut": "🥥",
-}
-
-
-def _build_plant_data():
-    data = {}
-    for color, names in TIER_ORDER.items():
-        depth = COLOR_CHAINS[color]["depth"]
-        chain = COLOR_CHAINS[color]["chain"]
-        opens_after = COLOR_CHAINS[color]["opens_after"]
-        for position, name in enumerate(names):
-            grow_days = 2 + position + (depth * 2)
-            cost = 20 + (position * 10) + (depth * 20)
-            data[name] = {
-                "name": name, "emoji": _EMOJI[name], "color": color, "chain": chain,
-                "depth": depth, "position": position,
-                "cost": cost, "grow_days": grow_days, "water_need": grow_days * 20,
-                "sell_price": round(cost * 1.5),
-                "unlocked_by_default": (position == 0 and depth == 0),
-                "unlock_threshold": UNLOCK_THRESHOLDS[position] if position > 0 else None,
-                "opens_after_tier": opens_after if position == 0 else None,
-            }
-    return data
-
-
-if "PLANT_DATA" not in globals():
-    PLANT_DATA = _build_plant_data()
-
-
-class Plant:
-    """A planted instance. Every plant starts as a SEED and grows toward MATURE
-    as growth_progress rises. Only a MATURE plant can be harvested or sold."""
-    STAGES = ("seed", "sprout", "mature")
-
-    def __init__(self, name, emoji, cost, water_need, grow_days=1, sell_price=0):
-        self.name = name
-        self.emoji = emoji
-        self.cost = cost
-        self.water_need = water_need
-        self.grow_days = max(1, grow_days)
-        self.sell_price = sell_price
-        self.growth_progress = 0
-        self.watered_today = False
-        self.stage = "seed"
-        self.update_stage()
-
-    @classmethod
-    def from_data(cls, name):   # O(1) average: PLANT_DATA is a hash table
-        d = PLANT_DATA[name]
-        return cls(d["name"], d["emoji"], d["cost"], d["water_need"], d["grow_days"], d["sell_price"])
-
-    def clone(self):
-        """A fresh SEED of this species - used when planting a new tile."""
-        return Plant(self.name, self.emoji, self.cost, self.water_need, self.grow_days, self.sell_price)
-
-    def sprout_threshold(self):   # the 1/3 mark of its total grow_days
-        return max(1, self.grow_days // 3)
-
-    def update_stage(self):
-        if self.growth_progress >= self.grow_days:
-            self.stage = "mature"
-        elif self.growth_progress >= self.sprout_threshold():
-            self.stage = "sprout"
-        else:
-            self.stage = "seed"
-
-    def grow_one_day(self):
-        if self.stage != "mature":
-            self.growth_progress = min(self.grow_days, self.growth_progress + 1)
-            self.update_stage()
-        self.watered_today = False
-
-    def water(self):
-        """+1 growth_progress on top of the natural daily tick. Returns True if it helped."""
-        if self.watered_today or self.stage == "mature":
-            return False
-        self.growth_progress = min(self.grow_days, self.growth_progress + 1)
-        self.watered_today = True
-        self.update_stage()
-        return True
-
-
-class Resources:
-    CAPS = {"water": 200, "seeds": 100, "energy": 120, "hope": 100, "coins": None}
-
-    def __init__(self, water, seeds, energy, hope, coins):
-        self.values = {"water": water, "seeds": seeds, "energy": energy, "hope": hope, "coins": coins}
-
-    def get(self, key):
-        return self.values[key]
-
-    def change(self, key, amount):
-        value = self.values[key] + amount
-        cap = self.CAPS[key]
-        self.values[key] = max(0, value if cap is None else min(cap, value))
-
-    def sync(self):
-        updateResources(**self.values)
-
-
-class GardenGrid:
-    def __init__(self, rows=10, cols=10):
-        self.rows = rows
-        self.cols = cols
-        self.cells = [[None] * cols for _ in range(rows)]
-
-    def to_position(self, row, col):
-        return row * self.cols + col
-
-    def in_bounds(self, row, col):
-        return 0 <= row < self.rows and 0 <= col < self.cols
-
-    def is_empty(self, row, col):
-        return self.cells[row][col] is None
-
-    def place(self, row, col, plant):
-        self.cells[row][col] = plant
-        addPlantToGrid(self.to_position(row, col), plant.name, plant.stage)
-
-    def remove(self, row, col):
-        plant = self.cells[row][col]
-        self.cells[row][col] = None
-        addPlantToGrid(self.to_position(row, col), "", "")
-        return plant
-
-    def redraw(self, row, col):   # re-sends a tile's current look without changing it
-        plant = self.cells[row][col]
-        if plant is not None:
-            addPlantToGrid(self.to_position(row, col), plant.name, plant.stage)
-
-    def each_plant(self):
-        for row in range(self.rows):
-            for col in range(self.cols):
-                plant = self.cells[row][col]
-                if plant is not None:
-                    yield row, col, plant
-
-
-class Inventory:
-    """Harvested plants waiting to be sold. A dict = a hash table, name -> quantity."""
-    def __init__(self):
-        self.items = {}
-
-    def add(self, name, qty=1):
-        self.items[name] = self.items.get(name, 0) + qty
-
-    def take(self, name, qty):
-        have = self.items.get(name, 0)
-        taken = min(have, qty)
-        if taken <= 0:
-            return 0
-        self.items[name] = have - taken
-        if self.items[name] <= 0:
-            del self.items[name]
-        return taken
-
-    def rows(self):
-        return [(name, PLANT_DATA[name]["emoji"], qty, PLANT_DATA[name]["sell_price"])
-                for name, qty in sorted(self.items.items())]
-
-
-class Market:
-    """Plants staged for sale. Everything here sells when the day ends."""
-    def __init__(self):
-        self.items = {}
-
-    def stage(self, name, qty):
-        self.items[name] = self.items.get(name, 0) + qty
-
-    def rows(self):
-        return [(name, PLANT_DATA[name]["emoji"], qty, PLANT_DATA[name]["sell_price"])
-                for name, qty in sorted(self.items.items())]
-
-    def total(self):
-        return sum(PLANT_DATA[name]["sell_price"] * qty for name, qty in self.items.items())
-
-    def payout(self):
-        earned = self.total()
-        self.items = {}
-        return earned
-
-
-class GardenGame:
-    HAZARD_EVERY = 3
-    MAX_STAMINA = 500
-    STAMINA_COSTS = {"plant": 15, "water": 10, "harvest": 10, "shovel": 10}
-    WATER_COST = 10   # Water resource spent per use of the watering can
-    SEEDS_PER_PLANT = 1
-
-    def __init__(self, catalog, resources, grid=None):
-        self.catalog = catalog
-        self.resources = resources
-        self.grid = grid or GardenGrid()
-        self.plants_since_hazard = 0
-        self.stamina = self.MAX_STAMINA
-        self.day = 1
-        self.harvest_counts = {}   # name -> lifetime harvest count, used to unlock the next plant
-        self.inventory = Inventory()
-        self.market = Market()
-
-    # ---- catalog (dynamic array) ----
-    def find_plant(self, name):   # O(n) scan of the currently-unlocked catalog
-        for plant in self.catalog:
-            if plant.name == name:
-                return plant
-        return None
-
-    def add_to_catalog(self, plant):   # O(1) amortized
-        self.catalog.append(plant)
-        self.refresh_dropdown()
-
-    # ---- stamina ----
-    def spend_stamina(self, action):
-        cost = self.STAMINA_COSTS[action]
-        if self.stamina < cost:
-            return "Too tired for that today. End the day to rest."
-        self.stamina -= cost
-        self.sync_stamina()
-        return None
-
-    def _maybe_auto_end_day(self):
-        if self.stamina <= 0:
-            return self.end_day()
-        return None
-
-    # ---- the four tile actions ----
-    def plant_at(self, row, col, plant_name):
-        prototype = self.find_plant(plant_name)
-        if prototype is None:
-            return "Pick a seed from the Seed Bag first."
-        if not self.grid.in_bounds(row, col):
-            return "That tile is outside the garden."
-        if not self.grid.is_empty(row, col):
-            return f"({row}, {col}) is already planted. Try watering, harvesting, or the shovel."
-        if self.resources.get("coins") < prototype.cost:
-            return f"Not enough coins for {prototype.name} ({prototype.cost}c)."
-        if self.resources.get("seeds") < self.SEEDS_PER_PLANT:
-            return "Out of seeds!"
-        stamina_msg = self.spend_stamina("plant")
-        if stamina_msg:
-            return stamina_msg
-
-        self.resources.change("coins", -prototype.cost)
-        self.resources.change("seeds", -self.SEEDS_PER_PLANT)
-        self.grid.place(row, col, prototype.clone())
-        stack.push_action(f"Planted {prototype.name} at ({row}, {col})")
-
-        hazard_msg = self.trigger_hazard_if_due()
-        self.resources.sync()
-        end_msg = self._maybe_auto_end_day()
-        return end_msg or hazard_msg or f"Planted {prototype.name}."
-
-    def water_at(self, row, col):
-        if not self.grid.in_bounds(row, col):
-            return "That tile is outside the garden."
-        plant = self.grid.cells[row][col]
-        if plant is None:
-            return "Nothing planted there yet."
-        if plant.stage == "mature":
-            return f"{plant.name} is already fully grown."
-        if plant.watered_today:
-            return f"{plant.name} has already been watered today."
-        if self.resources.get("water") < self.WATER_COST:
-            return "Not enough water in reserve."
-        stamina_msg = self.spend_stamina("water")
-        if stamina_msg:
-            return stamina_msg
-
-        self.resources.change("water", -self.WATER_COST)
-        plant.water()
-        self.grid.redraw(row, col)
-        stack.push_action(f"Watered {plant.name} at ({row}, {col})")
-        self.resources.sync()
-        end_msg = self._maybe_auto_end_day()
-        return end_msg or f"Watered {plant.name} - now {plant.stage}."
-
-    def harvest_at(self, row, col):
-        if not self.grid.in_bounds(row, col):
-            return "That tile is outside the garden."
-        plant = self.grid.cells[row][col]
-        if plant is None:
-            return "Nothing to harvest there."
-        if plant.stage != "mature":
-            return f"{plant.name} isn't ready yet ({plant.stage})."
-        stamina_msg = self.spend_stamina("harvest")
-        if stamina_msg:
-            return stamina_msg
-
-        self.grid.remove(row, col)
-        self.inventory.add(plant.name, 1)
-        self.harvest_counts[plant.name] = self.harvest_counts.get(plant.name, 0) + 1
-        stack.push_action(f"Harvested {plant.name} at ({row}, {col})")
-        self.refresh_inventory()
-
-        newly_unlocked = self.check_unlocks()
-        message = f"Harvested {plant.name}!"
-        if newly_unlocked:
-            names = ", ".join(f"{PLANT_DATA[n]['emoji']} {n}" for n in newly_unlocked)
-            message += f" Unlocked: {names}!"
-
-        end_msg = self._maybe_auto_end_day()
-        return end_msg or message
-
-    def shovel_at(self, row, col):
-        if not self.grid.in_bounds(row, col):
-            return "That tile is outside the garden."
-        plant = self.grid.cells[row][col]
-        if plant is None:
-            return "Nothing planted there to remove."
-        stamina_msg = self.spend_stamina("shovel")
-        if stamina_msg:
-            return stamina_msg
-
-        self.grid.remove(row, col)
-        stack.push_action(f"Removed {plant.name} at ({row}, {col}) with the shovel")
-        end_msg = self._maybe_auto_end_day()
-        return end_msg or f"Removed the {plant.name}. No refund."
-
-    # ---- hazards (unchanged trigger, still tied to planting) ----
-    def trigger_hazard_if_due(self):
-        self.plants_since_hazard += 1
-        if self.plants_since_hazard < self.HAZARD_EVERY:
-            return None
-        self.plants_since_hazard = 0
-        event = q.process_hazard()
-        if event is None:
-            return None
-        for resource, change in event.effects.items():
-            self.resources.change(resource, change)
-        summary = ", ".join(f"{change:+d} {resource}" for resource, change in event.effects.items())
-        return f"{event.name} hit the garden! ({summary})"
-
-    # ---- unlocking: harvest counts drive the color-tier chain from Topic 4 ----
-    def check_unlocks(self):
-        newly_unlocked = []
-        changed = True
-        while changed:
-            changed = False
-            unlocked_names = {plant.name for plant in self.catalog}
-
-            # within a tier: position p unlocks once the previous plant hits its threshold
-            for names in TIER_ORDER.values():
-                for position in range(1, len(names)):
-                    name = names[position]
-                    if name in unlocked_names:
-                        continue
-                    previous = names[position - 1]
-                    if self.harvest_counts.get(previous, 0) >= UNLOCK_THRESHOLDS[position]:
-                        self.add_to_catalog(Plant.from_data(name))
-                        newly_unlocked.append(name)
-                        unlocked_names.add(name)
-                        changed = True
-
-            # between tiers: a tier's first plant opens once its whole prerequisite tier is unlocked
-            for color, meta in COLOR_CHAINS.items():
-                if meta["opens_after"] is None:
-                    continue
-                prereq_names = TIER_ORDER[meta["opens_after"]]
-                if all(name in unlocked_names for name in prereq_names):
-                    first = TIER_ORDER[color][0]
-                    if first not in unlocked_names:
-                        self.add_to_catalog(Plant.from_data(first))
-                        newly_unlocked.append(first)
-                        unlocked_names.add(first)
-                        changed = True
-        if newly_unlocked and "plant_book" in globals():
-            plant_book.render()   # guarded: Topic 4 may not have run yet
-        return newly_unlocked
-
-    # ---- market ----
-    def sell_to_market(self, name):
-        qty = self.inventory.items.get(name, 0)
-        if qty <= 0:
-            return "You don't have any of that to sell."
-        self.inventory.take(name, qty)
-        self.market.stage(name, qty)
-        self.refresh_inventory()
-        self.refresh_market()
-        return f"Moved {qty}x {name} to the market."
-
-    # ---- ending the day ----
-    def end_day(self):
-        for row, col, plant in list(self.grid.each_plant()):
-            plant.grow_one_day()
-            self.grid.redraw(row, col)
-
-        earned = self.market.payout()
-        if earned:
-            self.resources.change("coins", earned)
-
-        self.day += 1
-        self.stamina = self.MAX_STAMINA
-        self.plants_since_hazard = 0
-
-        self.resources.sync()
-        self.sync_stamina()
-        self.sync_day()
-        self.refresh_inventory()
-        self.refresh_market()
-
-        stack.push_action(f"Day ended - Day {self.day} begins")
-        message = f"Day {self.day} begins. Everyone is rested."
-        if earned:
-            message += f" Market payout: +{earned} coins."
-        return message
-
-    # ---- display refreshers ----
-    def refresh_dropdown(self):
-        addPlantsToDropdown([(plant.name, plant.emoji, plant.cost) for plant in self.catalog])
-
-    def refresh_inventory(self):
-        updateInventory(self.inventory.rows())
-
-    def refresh_market(self):
-        updateMarket(self.market.rows(), self.market.total())
-
-    def sync_stamina(self):
-        updateStamina(self.stamina, self.MAX_STAMINA)
-
-    def sync_day(self):
-        updateDay(self.day)
-
-
-# ---- functions the page calls when the player acts ----
-def handle_tile_click(row, col, tool, plant_name):
-    if tool == "plant":
-        return game.plant_at(row, col, plant_name)
-    if tool == "water":
-        return game.water_at(row, col)
-    if tool == "harvest":
-        return game.harvest_at(row, col)
-    if tool == "shovel":
-        return game.shovel_at(row, col)
-    return f"Unknown tool: {tool}"
-
-def sell_to_market_action(name):
-    return game.sell_to_market(name)
-
-def end_day_action():
-    return game.end_day()
-
-
-if "game" not in globals():
-    starters = [Plant.from_data(name) for name, d in PLANT_DATA.items() if d["unlocked_by_default"]]
-    game = GardenGame(
-        catalog=starters,
-        resources=Resources(water=200, seeds=90, energy=110, hope=80, coins=999),
-    )
-
-game.refresh_dropdown()
-game.resources.sync()
-game.sync_stamina()
-game.sync_day()
-game.refresh_inventory()
-game.refresh_market()
-print(f"Master plant data ready: {len(PLANT_DATA)} plants across {len(TIER_ORDER)} tiers.")
-print(f"Day {game.day}, Stamina {game.stamina}/{game.MAX_STAMINA}. "
-      + f"Starters: " + ", ".join(p.name for p in game.catalog) + "\\n")
-print("Pick a tool (Plant / Water / Harvest / Shovel) and click a tile in the Interactive Sanctuary.")
-`
-  },
-  4: {
-    title: "Hierarchical Trees & Traversals",
-    code: `# Topic 4: Hierarchical Trees & Traversals
-
-from collections import deque
-
-if "game" not in globals():
-    raise RuntimeError("Run the earlier topics first (Topic 3 sets up PLANT_DATA and the garden). Missing: game")
-
-class PlantNode:
-    def __init__(self, label, emoji=None, is_plant=False, plant_name=None):
-        self.label = label
-        self.emoji = emoji
-        self.is_plant = is_plant
-        self.plant_name = plant_name
-        self.children = []
-
-    def add_child(self, child):   # O(1)
-        self.children.append(child)
-        return child
-
-    def preorder(self, depth=0, result=None):
-        if result is None:
-            result = []
-        result.append((depth, self))
-        for child in self.children:
-            child.preorder(depth + 1, result)
-        return result
-
-    def tally(self, unlocked_names):
-        """Postorder: children counted before their parent; totals roll upward."""
-        unlocked, total = 0, 0
-        for child in self.children:
-            child_unlocked, child_total = child.tally(unlocked_names)
-            unlocked += child_unlocked
-            total += child_total
-        if self.is_plant:
-            total += 1
-            if self.plant_name in unlocked_names:
-                unlocked += 1
-        return unlocked, total
-
-    def level_order(self):
-        levels = []
-        waiting = deque([(0, self)])
-        while waiting:
-            depth, node = waiting.popleft()   # O(1): front of the queue
-            if depth == len(levels):
-                levels.append([])
-            levels[depth].append(node)
-            for child in node.children:
-                waiting.append((depth + 1, child))
-        return levels
-
-    def _build_tier_node(color):
-        node = PlantNode(color)
-        for name in TIER_ORDER[color]:
-            node.add_child(PlantNode(name, PLANT_DATA[name]["emoji"], is_plant=True, plant_name=name))
-        for other_color, meta in COLOR_CHAINS.items():
-            if meta["opens_after"] == color:
-                node.add_child(_build_tier_node(other_color))
-        return node
-
-class PlantBook:
-    def __init__(self, game):
-        self.game = game
-        self.root = self.build_tree()
-
-    def build_tree(self):
-        root = PlantNode("Plant Book")
-        for color, meta in COLOR_CHAINS.items():
-            if meta["depth"] == 0:
-                root.add_child(_build_tier_node(color))
-        return root
-
-    def unlocked_names(self):
-        return {plant.name for plant in self.game.catalog}
-
-    def _requirement_note(self, name, unlocked_names):
-        d = PLANT_DATA[name]
-        if d["unlocked_by_default"]:
-            return "Starter plant"
-        if d["opens_after_tier"]:
-            prereq_names = TIER_ORDER[d["opens_after_tier"]]
-            have = sum(1 for n in prereq_names if n in unlocked_names)
-            return f"Opens once every {d['opens_after_tier']} plant is unlocked ({have}/{len(prereq_names)})"
-        names = TIER_ORDER[d["color"]]
-        previous = names[d["position"] - 1]
-        need = d["unlock_threshold"]
-        have = min(need, self.game.harvest_counts.get(previous, 0))
-        return f"Needs {need} harvests of {previous} ({have}/{need})"
-
-    def rows(self):
-        unlocked_names = self.unlocked_names()
-        rows = []
-        for depth, node in self.root.preorder():
-            if depth == 0:
-                continue
-            if node.is_plant:
-                note = self._requirement_note(node.plant_name, unlocked_names)
-                unlocked = node.plant_name in unlocked_names
-                rows.append((depth - 1, node.emoji, node.label, unlocked, note))
-            else:
-                unlocked, total = node.tally(unlocked_names)
-                rows.append((depth - 1, "🎨", f"{node.label} Tier", True, f"{unlocked}/{total} unlocked (incl. sub-tiers)"))
-        return rows
-
-    def render(self):
-        unlocked, total = self.root.tally(self.unlocked_names())
-        renderPlantBook(self.rows(), unlocked, total)
-
-    def print_levels(self):
-        lines = []
-        for depth, level in enumerate(self.root.level_order()):
-            labels = [node.label for node in level]
-            lines.append(f"Level {depth}: " + ", ".join(labels))
-        print("Plant Book, level by level:\\n" + "\\n".join(lines) + "\\n")
-
-plant_book = PlantBook(game)
-plant_book.render()
-plant_book.print_levels()
-
-unlocked, total = plant_book.root.tally(plant_book.unlocked_names())
-print(f"Plant Book ready! {unlocked} of {total} plants unlocked. Open the Plant Book tab to see it.")
-`
-  },
-  5: {
-    title: "Binary Search Trees (BST) & Node Mutation",
-    code: `# Topic 5: Binary Search Trees (BST) & Node Mutation
-
-if "game" not in globals():
-    raise RuntimeError("Run the earlier topics first (Topic 3 sets up PLANT_DATA and the garden). Missing: game")
-
-class PriceNode:
-    def __init__(self, cost, name):
-        self.cost = cost
-        self.name = name
-        self.left = None
-        self.right = None
-
-class PlantPriceBST:
-    """Every unlocked plant, ordered by cost. Ties (two plants at the same cost)
-    chain off to the right, so the tree is biased toward the RIGHT when many
-    plants share a price - which our own starters do, see below."""
-
-    def __init__(self):
-        self.root = None
-
-    def insert(self, cost, name):   # O(log n) average, O(n) worst case
-        self.root = self._insert(self.root, cost, name)
-
-    def _insert(self, node, cost, name):
-        if node is None:
-            return PriceNode(cost, name)
-        if cost < node.cost:
-            node.left = self._insert(node.left, cost, name)
-        else:   # cost >= node.cost: equal costs go right, so no plant is ever lost
-            node.right = self._insert(node.right, cost, name)
-        return node
-
-    def inorder(self):   # O(n): left, node, right
-        result = []
-        self._inorder(self.root, result)
-        return result
-
-    def _inorder(self, node, result):
-        if node is None:
-            return
-        self._inorder(node.left, result)
-        result.append(node)
-        self._inorder(node.right, result)
-
-    def preorder(self):   # O(n): node, left, right
-        result = []
-        self._preorder(self.root, result)
-        return result
-
-    def _preorder(self, node, result):
-        if node is None:
-            return
-        result.append(node)
-        self._preorder(node.left, result)
-        self._preorder(node.right, result)
-
-    def postorder(self):   # O(n): left, right, node
-        result = []
-        self._postorder(self.root, result)
-        return result
-
-    def _postorder(self, node, result):
-        if node is None:
-            return
-        self._postorder(node.left, result)
-        self._postorder(node.right, result)
-        result.append(node)
-
-    def height(self):   # O(n): how many levels deep the tree actually is
-        return self._height(self.root)
-
-    def _height(self, node):
-        if node is None:
-            return 0
-        return 1 + max(self._height(node.left), self._height(node.right))
-
-def _rebuild_price_bst():
-    tree = PlantPriceBST()
-    for plant in game.catalog:   # inserted in catalog order: unlock order, not sorted order
-        tree.insert(plant.cost, plant.name)
-    return tree
-
-price_bst = _rebuild_price_bst()
-
-inorder_nodes = price_bst.inorder()
-preorder_nodes = price_bst.preorder()
-postorder_nodes = price_bst.postorder()
-
-# Inorder does real work here: the Seed Bag dropdown is re-sorted cheapest-first,
-# straight from the traversal result - no separate sorting logic needed.
-addPlantsToDropdown([(n.name, PLANT_DATA[n.name]["emoji"], n.cost) for n in inorder_nodes])
-
-print(f"Plant Price BST ready: {len(inorder_nodes)} plants, tree height {price_bst.height()}.\\n")
-
-print("INORDER (ascending by cost - this is the new Seed Bag order):")
-print("  " + " -> ".join(f"{n.name}({n.cost}c)" for n in inorder_nodes) + "\\n")
-
-print("PREORDER (backup sequence - replay these inserts to rebuild the exact same tree):")
-print("  " + " -> ".join(f"{n.name}({n.cost}c)" for n in preorder_nodes) + "\\n")
-
-print("POSTORDER (safe teardown order - children cleared before their parent):")
-print("  " + " -> ".join(f"{n.name}({n.cost}c)" for n in postorder_nodes) + "\\n")
-
-ideal_height = len(inorder_nodes).bit_length()   # roughly log2(n) + 1, a balanced tree's height
-if price_bst.height() > ideal_height + 1:
-    print(f"Note: tree height is {price_bst.height()}, but a balanced tree holding "
-          f"{len(inorder_nodes)} plants would only need about {ideal_height}. Several of our "
-          f"plants START at the same cost (the three starters are all 20c!), and ties always "
-          f"go right here, so the tree is leaning into a chain rather than staying bushy. "
-          f"That's the real-world case for self-balancing trees (AVL, Red-Black) - out of "
-          f"scope for this topic, but this is exactly the problem they solve.")
-`
-  },
-  6: {
-    title: "Hash Tables, Collisions, & Rehashing",
-    code: `# Topic 6: Hash Tables, Collisions, & Rehashing
-# ==== WRITE YOUR CODE HERE ====
-`
-  },
-  7: {
-    title: "Graph Foundations, Adjacency Matrices/Lists, & DFS/BFS",
-    code: `# Topic 7: Graph Foundations, Adjacency Matrices/Lists, & DFS/BFS
-# ==== WRITE YOUR CODE HERE ====
-`
-  },
-  8: {
-    title: "Sorting Algorithms (Bubble, Insertion, Selection, Quick, & Merge Sort)",
-    code: `# Topic 8: Sorting Algorithms (Bubble, Insertion, Selection, Quick, & Merge Sort)
-# ==== WRITE YOUR CODE HERE ====
-`
-  },
-  9: {
-    title: "Searching Algorithms (Linear Search vs. Binary Search)",
-    code: `# Topic 9: Searching Algorithms (Linear Search vs. Binary Search)
-# ==== WRITE YOUR CODE HERE ====
-`
-  },
-  10: {
-    title: "Advanced Strategic Paradigms (Dijkstra's Algorithm & Greedy Patterns)",
-    code: `# Topic 10: Advanced Strategic Paradigms (Dijkstra's Algorithm & Greedy Patterns)
-# ==== WRITE YOUR CODE HERE ====
-`
-  },
-  11: {
-    title: "Dynamic Programming (DP), Memoization, & Divide-and-Conquer",
-    code: `# Topic 11: Dynamic Programming (DP), Memoization, & Divide-and-Conquer
-# ==== WRITE YOUR CODE HERE ====
-`
-  }
+  1: { title: "Python OOP + Big O + Stacks", code: "" },
+  2: { title: "Queues & Deques (FIFO Elements)", code: "" },
+  3: { title: "Static/Dynamic Arrays, 2D Lists, & Memory Structures", code: "" },
+  4: { title: "Hierarchical Trees & Traversals", code: "" },
+  5: { title: "Binary Search Trees (BST) & Node Mutation", code: "" },
+  6: { title: "Hash Tables, Collisions, & Rehashing", code: "" },
+  7: { title: "Graph Foundations, Adjacency Matrices/Lists, & DFS/BFS", code: "" },
+  8: { title: "Sorting Algorithms (Bubble, Insertion, Selection, Quick, & Merge Sort)", code: "" },
+  9: { title: "Searching Algorithms (Linear Search vs. Binary Search)", code: "" },
+  10: { title: "Advanced Strategic Paradigms (Dijkstra's Algorithm & Greedy Patterns)", code: "" },
+  11: { title: "Dynamic Programming (DP), Memoization, & Divide-and-Conquer", code: "" }
 };
+
+// Fetches garden-topics.py and fills topicTemplates[n].code for each topic.
+async function loadTopicCode() {
+  const response = await fetch(TOPICS_PY_URL, { cache: "no-store" });
+  if (!response.ok) throw new Error(`Could not load ${TOPICS_PY_URL} (HTTP ${response.status})`);
+  const text = (await response.text()).replace(/\r\n/g, "\n");
+
+  // split() with a capture group returns [preamble, "1", code1, "2", code2, ...]
+  const parts = text.split(/^# ={5,} TOPIC (\d+) ={5,}\n/m);
+  for (let i = 1; i < parts.length; i += 2) {
+    const key = Number(parts[i]);
+    if (topicTemplates[key]) topicTemplates[key].code = parts[i + 1].trim() + "\n";
+  }
+}
 
 async function initPyodide() {
   if (pyodideInstance) return;
@@ -907,6 +69,7 @@ async function initPyodide() {
     pyodideInstance.globals.set("pushAction", pushAction);
     pyodideInstance.globals.set("updateClimateQueue", updateClimateQueue);
     pyodideInstance.globals.set("renderPlantBook", renderPlantBook);
+    pyodideInstance.globals.set("renderTraversalCompare", renderTraversalCompare);
     pyodideInstance.globals.set("updateStamina", updateStamina);
     pyodideInstance.globals.set("updateDay", updateDay);
     pyodideInstance.globals.set("updateInventory", updateInventory);
@@ -978,16 +141,16 @@ const STAGE_ICON = { seed: "🌱", sprout: "🌿" };
 function renderGarden() {
   const grid = document.getElementById("garden-grid");
   grid.innerHTML = "";
-  for (let i = 0; i < 100; i++) {
+  for (let i = 0; i < 49; i++) {
     const cell = document.createElement("div");
     const entry = gardenPlants[i];
     const mature = entry && entry.stage === "mature";
-    cell.className = "aspect-square rounded-md flex items-center justify-center text-base border cursor-pointer transition-colors select-none " +
+    cell.className = "aspect-square rounded-lg flex items-center justify-center text-2xl border cursor-pointer transition-colors select-none " +
       (mature ? "bg-[#2a3825] border-emerald-600 hover:border-emerald-400" : entry ? "bg-[#232f1f] border-emerald-900 hover:border-emerald-500" : "bg-[#2a3825] border-emerald-800 hover:border-emerald-400");
     cell.textContent = entry ? (entry.stage === "mature" ? (plantEmoji[entry.name] || "🌱") : STAGE_ICON[entry.stage] || "🌱") : "⬜";
     if (entry) cell.title = `${entry.name} (${entry.stage})`;
-    // 5 tiles per row: flat position i  <->  (row, col)
-    cell.addEventListener("click", () => handleTileClick(Math.floor(i / 10), i % 10));
+    // 7 tiles per row: flat position i  <->  (row, col)
+    cell.addEventListener("click", () => handleTileClick(Math.floor(i / 7), i % 7));
     grid.appendChild(cell);
   }
 }
@@ -1047,35 +210,27 @@ function sellToMarket(name) {
 // updateResources(water, seeds, energy, hope, coins)
 // Or pass a single object: updateResources({"water": n, "seeds": n, ...})
 // No fallbacks that turn a valid 0 into a default. Caps used only for bar width.
+// Energy and Hope still arrive here (Python keeps tracking them for later use;
+// see changes.md) but are no longer drawn - only Water, Seeds and Coins are shown.
 function updateResources(water, seeds, energy, hope, coins) {
   if (typeof water === "object" && water !== null) {
     const args = water;
-    water  = args.water  !== undefined ? args.water  : 0;
-    seeds  = args.seeds  !== undefined ? args.seeds  : 0;
-    energy = args.energy !== undefined ? args.energy : 0;
-    hope   = args.hope   !== undefined ? args.hope   : 0;
-    coins  = args.coins  !== undefined ? args.coins  : 0;
+    water = args.water !== undefined ? args.water : 0;
+    seeds = args.seeds !== undefined ? args.seeds : 0;
+    coins = args.coins !== undefined ? args.coins : 0;
   } else {
-    water  = water  !== undefined ? water  : 0;
-    seeds  = seeds  !== undefined ? seeds  : 0;
-    energy = energy !== undefined ? energy : 0;
-    hope   = hope   !== undefined ? hope   : 0;
-    coins  = coins  !== undefined ? coins  : 0;
+    water = water !== undefined ? water : 0;
+    seeds = seeds !== undefined ? seeds : 0;
+    coins = coins !== undefined ? coins : 0;
   }
 
-  const waterMax = 200, seedsMax = 100, energyMax = 120, hopeMax = 100;
+  const waterMax = 200, seedsMax = 100;
 
   document.getElementById("water-text").innerText = `${water} / ${waterMax} L`;
   document.getElementById("water-bar").style.width = `${Math.min(100, (water / waterMax) * 100)}%`;
 
   document.getElementById("seeds-text").innerText = `${seeds} / ${seedsMax}`;
   document.getElementById("seeds-bar").style.width = `${Math.min(100, (seeds / seedsMax) * 100)}%`;
-
-  document.getElementById("energy-text").innerText = `${energy} / ${energyMax} Wh`;
-  document.getElementById("energy-bar").style.width = `${Math.min(100, (energy / energyMax) * 100)}%`;
-
-  document.getElementById("hope-text").innerText = `${hope} / ${hopeMax}`;
-  document.getElementById("hope-bar").style.width = `${Math.min(100, (hope / hopeMax) * 100)}%`;
 
   document.getElementById("coins-text").innerText = `${coins} Coins`;
 }
@@ -1133,6 +288,220 @@ function renderPlantBook(rows, unlockedCount, totalCount) {
     row.appendChild(badge);
     list.appendChild(row);
   });
+}
+
+// =====================================================================
+// TRAVERSAL COMPARE (demo only - display only, no game logic)
+// Python (PlantBook.traversal_orders) does the traversals; this only draws them.
+// =====================================================================
+const TRAVERSAL_PANELS = [
+  { key: "bfs",       short: "BFS",  title: "BFS · Level-order", hint: "Level by level · Queue",  accent: "text-sky-300" },
+  { key: "preorder",  short: "Pre",  title: "DFS · Pre-order",   hint: "Node → children",         accent: "text-emerald-300" },
+  { key: "inorder",   short: "In",   title: "DFS · In-order",    hint: "1st child → node → rest", accent: "text-emerald-300" },
+  { key: "postorder", short: "Post", title: "DFS · Post-order",  hint: "Children → node",         accent: "text-emerald-300" }
+];
+const DEPTH_COLORS = ["#fbbf24", "#34d399", "#38bdf8", "#c084fc", "#fb7185", "#a3e635", "#f472b6"];
+
+let plantBookMode = "book";   // "book" | "compare"
+let traversalData = null;     // { bfs, preorder, inorder, postorder }: lists of [depth, emoji, name, unlocked, isPlant]
+let traversalCells = [];      // traversalCells[panel][i] -> the row element for that panel's i-th visited node
+let traversalStep = 0;        // how many nodes each traversal has visited so far
+let traversalTimer = null;
+
+// renderTraversalCompare(bfs, preorder, inorder, postorder)
+// Each argument: list of [depth, emoji, name, unlocked, isPlant], already in visit order.
+function renderTraversalCompare(bfs, preorder, inorder, postorder) {
+  // Python proxies die when this call returns, and the animation needs the data later: copy to plain JS.
+  const copy = rows => (rows && typeof rows.toJs === "function") ? rows.toJs() : rows;
+  const next = { bfs: copy(bfs), preorder: copy(preorder), inorder: copy(inorder), postorder: copy(postorder) };
+  const total = next.bfs.length;
+  const wasComplete = !traversalData || traversalStep >= traversalData.bfs.length;
+  traversalData = next;
+  traversalStep = wasComplete ? total : Math.min(traversalStep, total);   // keep your place if the book re-renders mid-play
+  document.getElementById("traversal-empty").classList.add("hidden");
+  document.getElementById("traversal-body").classList.remove("hidden");
+  buildTraversalGrid();
+  applyTraversalStep();
+}
+
+function buildTraversalGrid() {
+  const grid = document.getElementById("traversal-grid");
+  grid.innerHTML = "";
+  traversalCells = [];
+  let maxDepth = 0;
+
+  TRAVERSAL_PANELS.forEach(panel => {
+    const col = document.createElement("div");
+    col.className = "min-w-0";
+
+    const head = document.createElement("div");
+    head.className = "tv-head sticky top-0 z-10 h-11 px-2 py-1 mb-1 rounded-lg bg-[#192218] border border-emerald-800/60";
+    const title = document.createElement("div");
+    title.className = "text-[11px] font-extrabold truncate " + panel.accent;
+    title.textContent = panel.title;
+    const hint = document.createElement("div");
+    hint.className = "text-[10px] text-emerald-300/70 truncate";
+    hint.textContent = panel.hint;
+    head.title = `${panel.title}: ${panel.hint}`;
+    head.appendChild(title);
+    head.appendChild(hint);
+    col.appendChild(head);
+
+    const cells = [];
+    traversalData[panel.key].forEach(([depth, emoji, name, unlocked, isPlant], i) => {
+      maxDepth = Math.max(maxDepth, depth);
+      const row = document.createElement("div");
+      row.className = "tv-row unvisited flex items-center gap-1 h-7 px-1.5 mb-1 rounded-md border text-[11px] " +
+        (isPlant ? "bg-[#1b2219] border-emerald-900 text-emerald-50" : "bg-[#2a3825] border-emerald-700 font-bold text-white");
+      row.dataset.key = name;
+      row.title = `#${i + 1} ${name} (depth ${depth}${unlocked ? "" : ", locked"})`;
+      row.style.borderLeftWidth = "4px";
+      row.style.borderLeftColor = DEPTH_COLORS[depth % DEPTH_COLORS.length];
+
+      const num = document.createElement("span");
+      num.className = "tv-num w-5 shrink-0 text-right text-[10px] font-bold tabular-nums text-amber-300";
+      num.textContent = i + 1;
+      const icon = document.createElement("span");
+      icon.className = "shrink-0 text-sm leading-none" + (unlocked ? "" : " grayscale");
+      icon.textContent = emoji;
+      const label = document.createElement("span");
+      label.className = "truncate min-w-0" + (unlocked ? "" : " text-emerald-200/60");
+      label.textContent = name;
+
+      row.appendChild(num);
+      row.appendChild(icon);
+      row.appendChild(label);
+      col.appendChild(row);
+      cells.push(row);
+    });
+    traversalCells.push(cells);
+    grid.appendChild(col);
+  });
+
+  // Legend: the left stripe on every row is its depth in the tree.
+  const legend = document.getElementById("traversal-legend");
+  legend.innerHTML = "<span>Left stripe = depth:</span>";
+  for (let d = 0; d <= maxDepth; d++) {
+    const item = document.createElement("span");
+    item.className = "flex items-center gap-1";
+    const swatch = document.createElement("span");
+    swatch.className = "inline-block w-2.5 h-2.5 rounded-sm";
+    swatch.style.backgroundColor = DEPTH_COLORS[d % DEPTH_COLORS.length];
+    item.appendChild(swatch);
+    item.appendChild(document.createTextNode(d === 0 ? "root" : `level ${d}`));
+    legend.appendChild(item);
+  }
+
+  // Hover any node to light it up in all four lists.
+  grid.onmouseover = e => highlightLinked(e.target.closest(".tv-row"));
+  grid.onmouseout = () => highlightLinked(null);
+}
+
+function highlightLinked(row) {
+  const key = row ? row.dataset.key : null;
+  traversalCells.forEach(cells => cells.forEach(r => r.classList.toggle("linked", key !== null && r.dataset.key === key)));
+}
+
+function applyTraversalStep() {
+  if (!traversalData) return;
+  const total = traversalData.bfs.length;
+  traversalCells.forEach(cells => cells.forEach((row, i) => {
+    row.classList.toggle("unvisited", i >= traversalStep);
+    row.classList.toggle("current", traversalStep > 0 && traversalStep < total && i === traversalStep - 1);
+  }));
+
+  document.getElementById("traversal-step-label").textContent = `Visited ${traversalStep} / ${total}`;
+  const slider = document.getElementById("traversal-slider");
+  slider.max = total;
+  slider.value = traversalStep;
+
+  const now = document.getElementById("traversal-now");
+  if (traversalStep === 0) {
+    now.textContent = "Nothing visited yet. Press Play or Step.";
+  } else if (traversalStep >= total) {
+    now.textContent = `All ${total} nodes visited: same tree, four different orders.`;
+  } else {
+    now.textContent = `Step ${traversalStep}: ` +
+      TRAVERSAL_PANELS.map(p => `${p.short} → ${traversalData[p.key][traversalStep - 1][2]}`).join("  ·  ");
+  }
+  scrollTraversalIntoView();
+}
+
+// Rows have a fixed height, so row i lines up across all four lists: scroll them together.
+function scrollTraversalIntoView() {
+  const total = traversalData.bfs.length;
+  if (traversalStep < 1 || traversalStep >= total) return;
+  const wrap = document.getElementById("traversal-scroll");
+  const row = traversalCells[0][traversalStep - 1];
+  const head = wrap.querySelector(".tv-head");
+  const headH = head ? head.offsetHeight : 0;
+  const top = row.offsetTop, bottom = top + row.offsetHeight;
+  if (top < wrap.scrollTop + headH) wrap.scrollTop = Math.max(0, top - headH - 4);
+  else if (bottom > wrap.scrollTop + wrap.clientHeight) wrap.scrollTop = bottom - wrap.clientHeight + 4;
+}
+
+function toggleTraversalPlay() {
+  if (traversalTimer) { pauseTraversal(); return; }
+  if (!traversalData) return;
+  if (traversalStep >= traversalData.bfs.length) traversalStep = 0;   // finished? replay from the start
+  applyTraversalStep();
+  startTraversalTimer();
+}
+
+function startTraversalTimer() {
+  const delay = Number(document.getElementById("traversal-speed").value);
+  traversalTimer = setInterval(() => {
+    stepTraversal(true);
+    if (traversalStep >= traversalData.bfs.length) pauseTraversal();
+  }, delay);
+  document.getElementById("traversal-play").textContent = "⏸ Pause";
+}
+
+function pauseTraversal() {
+  if (traversalTimer) clearInterval(traversalTimer);
+  traversalTimer = null;
+  const button = document.getElementById("traversal-play");
+  if (button) button.textContent = "▶ Play";
+}
+
+function changeTraversalSpeed() {
+  if (!traversalTimer) return;
+  clearInterval(traversalTimer);
+  startTraversalTimer();
+}
+
+function stepTraversal(fromTimer) {
+  if (!traversalData) return;
+  if (!fromTimer) pauseTraversal();
+  const total = traversalData.bfs.length;
+  traversalStep = traversalStep >= total ? 1 : traversalStep + 1;   // stepping past the end wraps to the start
+  applyTraversalStep();
+}
+
+function resetTraversal() {
+  pauseTraversal();
+  traversalStep = 0;
+  applyTraversalStep();
+}
+
+function scrubTraversal(value) {
+  pauseTraversal();
+  traversalStep = Number(value);
+  applyTraversalStep();
+}
+
+// Plant Book view toggle: the normal book vs. the traversal comparison.
+function setPlantBookMode(mode) {
+  plantBookMode = mode;
+  document.getElementById("plant-book-standard").classList.toggle("hidden", mode !== "book");
+  document.getElementById("plant-book-compare").classList.toggle("hidden", mode !== "compare");
+  [["book", "pbmode-book"], ["compare", "pbmode-compare"]].forEach(([name, id]) => {
+    const button = document.getElementById(id);
+    button.classList.toggle("bg-[#283623]", mode === name);
+    button.classList.toggle("text-emerald-100", mode === name);
+    button.classList.toggle("text-emerald-400/80", mode !== name);
+  });
+  if (mode !== "compare") pauseTraversal();
 }
 
 // updateStamina(current, max)
@@ -1199,7 +568,7 @@ function renderActionStack() {
   [...displayActionHistory].reverse().forEach(act => {
     const div = document.createElement("div");
     div.className = "bg-emerald-950/60 border-l-2 border-amber-500 px-3 py-2 rounded text-xs text-emerald-100";
-    div.textContent = `→ ${act}`;
+    div.textContent = act;
     container.appendChild(div);
   });
 }
@@ -1256,11 +625,25 @@ async function runAllTopics() {
 
 function loadTopic() {
   const key = document.getElementById("topic-selector").value;
-  document.getElementById("code-editor").value = topicTemplates[key].code;
+  const editor = document.getElementById("code-editor");
+  if (topicTemplates[key].code) {
+    editor.value = topicTemplates[key].code;
+  } else if (topicLoadError) {
+    editor.value =
+      `# COULD NOT LOAD ${TOPICS_PY_URL}\n# Reason: ${topicLoadError}\n#\n` +
+      `# 1) If the address bar starts with file://, the browser blocks fetch().\n` +
+      `#    Serve the folder instead: run  python -m http.server  in it,\n` +
+      `#    then open http://localhost:8000/garden-simulator.html\n` +
+      `# 2) Check the filename matches exactly (hyphen vs underscore): ${TOPICS_PY_URL}\n` +
+      `# 3) Keep the .html, .js and .py files in the same folder.`;
+  } else {
+    editor.value = `# No code found for Topic ${key} in ${TOPICS_PY_URL}.\n# Check that it has a line:  # ===== TOPIC ${key} =====`;
+  }
 }
 
 function switchTab(tab) {
-  ["game", "code", "book", "inventory"].forEach(name => {
+  if (tab !== "book") pauseTraversal();
+  ["game", "code", "book", "inventory", "market"].forEach(name => {
     const button = document.getElementById("tab-" + name);
     document.getElementById("view-" + name).classList.toggle("hidden", tab !== name);
     button.classList.toggle("bg-[#283623]", tab === name);
@@ -1269,7 +652,7 @@ function switchTab(tab) {
   });
 }
 
-window.onload = () => {
+window.onload = async () => {
   document.getElementById("version-badge").textContent = "v" + APP_VERSION;
   lucide.createIcons();
   renderGarden();
@@ -1285,6 +668,13 @@ window.onload = () => {
     opt.textContent = topicTemplates[k].title;
     select.appendChild(opt);
   });
+  try {
+    await loadTopicCode();
+  } catch (err) {
+    topicLoadError = err.message;
+    console.error("loadTopicCode failed:", err);
+    showToast("Could not load " + TOPICS_PY_URL + " - open the Student Code Editor tab for details.");
+  }
   loadTopic();
   switchTab("game");
 

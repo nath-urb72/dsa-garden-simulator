@@ -40,9 +40,11 @@ from collections import deque
 # that does something to the garden itself ("water_plants"). Not every event
 # is bad - Drizzle is a genuine benefit.
 EVENT_TABLE = {
-    "Drought":   {"kind": "resource",     "effects": {"water": -30}},
-    "Snowstorm": {"kind": "resource",     "effects": {"seeds": -10}},
-    "Drizzle":   {"kind": "water_plants", "count": 3},
+    "Drought":      {"kind": "water_rationing", "multiplier": 2},
+    "Snowstorm":    {"kind": "growth_freeze"},
+    "Drizzle":      {"kind": "water_plants",     "count": 3},
+    "Market Rally": {"kind": "market_bonus",     "pct": 20},
+    "Cold Snap":    {"kind": "stamina_penalty",  "multiplier": 2},
 }
 
 class ClimateEvent:
@@ -75,7 +77,7 @@ class ClimateQueue():
 
 if "q" not in globals():
     q = ClimateQueue()
-    for event_name in ("Drought", "Snowstorm", "Drizzle"):
+    for event_name in EVENT_TABLE:
         q.add_event(event_name)
 
 q.refresh_display()
@@ -332,6 +334,12 @@ class GardenGame:
         self.harvest_counts = {}   # name -> lifetime harvest count, used to unlock the next plant
         self.inventory = Inventory()
         self.market = Market()
+        # Reset to defaults at the start of every end_day(); an event firing during
+        # that day's event roll can change them for the day that's about to begin.
+        self.stamina_cost_multiplier = 1   # Cold Snap
+        self.water_cost_multiplier = 1     # Drought (Water Rationing)
+        self._growth_frozen = False        # Snowstorm (Growth Freeze) - this day's tick only
+        self._market_bonus_pct = 0         # Market Rally - this end_day's payout only
 
     # ---- catalog (dynamic array) ----
     def find_plant(self, name):   # O(n) scan of the currently-unlocked catalog
@@ -346,7 +354,7 @@ class GardenGame:
 
     # ---- stamina ----
     def spend_stamina(self, action):
-        cost = self.STAMINA_COSTS[action]
+        cost = self.STAMINA_COSTS[action] * self.stamina_cost_multiplier
         if self.stamina < cost:
             return "😴 Too tired for that today. Sell your harvest, then press End Day when ready."
         self.stamina -= cost
@@ -395,13 +403,14 @@ class GardenGame:
             return f"{plant.name} is already fully grown."
         if plant.watered_today:
             return f"{plant.name} has already been watered today."
-        if self.resources.get("water") < self.WATER_COST:
+        water_cost = self.WATER_COST * self.water_cost_multiplier
+        if self.resources.get("water") < water_cost:
             return "Not enough water in reserve."
         stamina_msg = self.spend_stamina("water")
         if stamina_msg:
             return stamina_msg
 
-        self.resources.change("water", -self.WATER_COST)
+        self.resources.change("water", -water_cost)
         plant.water()
         self.grid.redraw(row, col)
         stack.push_action(f"Watered {plant.name} at ({row}, {col})")
@@ -460,12 +469,15 @@ class GardenGame:
 
     def apply_event(self, event):
         data = event.data
-        if data["kind"] == "resource":
+        kind = data["kind"]
+
+        if kind == "resource":
             for resource, change in data["effects"].items():
                 self.resources.change(resource, change)
             summary = ", ".join(f"{change:+d} {resource}" for resource, change in data["effects"].items())
             return f"{event.name}! ({summary})"
-        if data["kind"] == "water_plants":
+
+        if kind == "water_plants":
             candidates = [(r, c, p) for r, c, p in self.grid.each_plant() if p.stage != "mature"]
             random.shuffle(candidates)
             watered = 0
@@ -475,6 +487,23 @@ class GardenGame:
                 self.grid.redraw(row, col)
                 watered += 1
             return f"{event.name}! Automatically watered {watered} plant(s)."
+
+        if kind == "water_rationing":
+            self.water_cost_multiplier = data.get("multiplier", 2)
+            return f"{event.name}! Watering costs {self.water_cost_multiplier}x today."
+
+        if kind == "growth_freeze":
+            self._growth_frozen = True
+            return f"{event.name}! The cold halts all natural growth today."
+
+        if kind == "market_bonus":
+            self._market_bonus_pct = data.get("pct", 20)
+            return f"{event.name}! Today's market payout gets a +{self._market_bonus_pct}% bonus."
+
+        if kind == "stamina_penalty":
+            self.stamina_cost_multiplier = data.get("multiplier", 2)
+            return f"{event.name}! Every action costs {self.stamina_cost_multiplier}x stamina today."
+
         return f"{event.name} happened."
 
     # ---- unlocking: harvest counts drive the color-tier chain from Topic 4 ----
@@ -527,15 +556,28 @@ class GardenGame:
 
     # ---- ending the day ----
     def end_day(self):
-        for row, col, plant in list(self.grid.each_plant()):
-            plant.grow_one_day()
-            self.grid.redraw(row, col)
+        # Reset every modifier BEFORE rolling events, so today's event roll decides
+        # what the NEW day looks like (and Growth Freeze can still block the growth
+        # tick a few lines down, since it fires before that tick runs).
+        self.stamina_cost_multiplier = 1
+        self.water_cost_multiplier = 1
+        self._growth_frozen = False
+        self._market_bonus_pct = 0
 
         event_messages = self.process_daily_events()
         for msg in event_messages:
             stack.push_action(msg)
 
+        if not self._growth_frozen:
+            for row, col, plant in list(self.grid.each_plant()):
+                plant.grow_one_day()
+                self.grid.redraw(row, col)
+
         earned = self.market.payout()
+        if earned and self._market_bonus_pct:
+            bonus = round(earned * self._market_bonus_pct / 100)
+            earned += bonus
+            event_messages.append(f"Market Rally bonus: +{bonus} coins!")
         if earned:
             self.resources.change("coins", earned)
 
@@ -639,6 +681,27 @@ class PlantNode:
             child.preorder(depth + 1, result)
         return result
 
+    def inorder(self, depth=0, result=None):   # O(n)
+        """n-ary in-order: the FIRST child's subtree, then this node, then the remaining
+        children. On a binary tree this is exactly left -> node -> right."""
+        if result is None:
+            result = []
+        if self.children:
+            self.children[0].inorder(depth + 1, result)
+        result.append((depth, self))
+        for child in self.children[1:]:
+            child.inorder(depth + 1, result)
+        return result
+
+    def postorder(self, depth=0, result=None):   # O(n)
+        """Children first, then the node itself (tally() below uses the same order)."""
+        if result is None:
+            result = []
+        for child in self.children:
+            child.postorder(depth + 1, result)
+        result.append((depth, self))
+        return result
+
     def tally(self, unlocked_names):
         """Postorder: children counted before their parent; totals roll upward."""
         unlocked, total = 0, 0
@@ -718,9 +781,29 @@ class PlantBook:
                 rows.append((depth - 1, heart, f"{node.label} Tier", True, f"{unlocked}/{total} unlocked (incl. sub-tiers)"))
         return rows
 
+    def _traversal_row(self, depth, node, unlocked_names):
+        """[depth, emoji, label, unlocked, is_plant] for one visited node."""
+        if node.is_plant:
+            return [depth, node.emoji, node.label, node.plant_name in unlocked_names, True]
+        if depth == 0:
+            return [depth, "📖", node.label, True, False]
+        return [depth, COLOR_HEART.get(node.label, "🎨"), f"{node.label} Tier", True, False]
+
+    def traversal_orders(self):
+        """Demo only: the SAME tree visited four ways, for the Traversal Compare view.
+        Returns (bfs, preorder, inorder, postorder), each a list of rows in visit order."""
+        unlocked_names = self.unlocked_names()
+
+        def rows(pairs):
+            return [self._traversal_row(depth, node, unlocked_names) for depth, node in pairs]
+
+        bfs = [(depth, node) for depth, level in enumerate(self.root.level_order()) for node in level]
+        return rows(bfs), rows(self.root.preorder()), rows(self.root.inorder()), rows(self.root.postorder())
+
     def render(self):
         unlocked, total = self.root.tally(self.unlocked_names())
         renderPlantBook(self.rows(), unlocked, total)
+        renderTraversalCompare(*self.traversal_orders())
 
     def print_levels(self):
         lines = []
@@ -735,6 +818,7 @@ plant_book.print_levels()
 
 unlocked, total = plant_book.root.tally(plant_book.unlocked_names())
 print(f"Plant Book ready! {unlocked} of {total} plants unlocked. Open the Plant Book tab to see it.")
+print("Traversal Compare ready! In the Plant Book tab, switch the toggle to compare BFS and DFS orders.")
 
 
 # ===== TOPIC 5 =====
