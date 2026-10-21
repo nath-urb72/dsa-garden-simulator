@@ -6,7 +6,7 @@
 // PATCH: bug fix or small tweak with no new feature
 // Use 0.x.y while in development; move to 1.0.0 once all 11 topics are complete.
 // =====================================================================
-const APP_VERSION = "1.3.0";
+const APP_VERSION = "1.4.0";
 
 // 100000 -> "100,000": big prices stay readable.
 const fmt = (n) => Number(n).toLocaleString("en-US");
@@ -80,6 +80,7 @@ async function initPyodide() {
     pyodideInstance.globals.set("updateDay", updateDay);
     pyodideInstance.globals.set("updateInventory", updateInventory);
     pyodideInstance.globals.set("updateMarket", updateMarket);
+    pyodideInstance.globals.set("updateShop", updateShop);
 
     await pyodideInstance.runPythonAsync(`
 import sys
@@ -213,46 +214,53 @@ function sellToMarket(name) {
   callPythonAction("sell_to_market_action", name);
 }
 
-// updateResources(water, seeds, energy, hope, coins)
-// Or pass a single object: updateResources({"water": n, "seeds": n, ...})
+// updateResources(water, energy, hope, coins)
+// Or pass a single object: updateResources({"water": n, "coins": n, ...})
 // No fallbacks that turn a valid 0 into a default. Caps used only for bar width.
 // Energy and Hope still arrive here (Python keeps tracking them for later use;
-// see changes.md) but are no longer drawn - only Water, Seeds and Coins are shown.
-function updateResources(water, seeds, energy, hope, coins) {
+// see changes.md) but are no longer drawn - only Water and Coins are shown.
+// (Seeds are not a resource any more: they are owned per plant, see the Seed Bag.)
+function updateResources(water, energy, hope, coins) {
   if (typeof water === "object" && water !== null) {
     const args = water;
     water = args.water !== undefined ? args.water : 0;
-    seeds = args.seeds !== undefined ? args.seeds : 0;
     coins = args.coins !== undefined ? args.coins : 0;
   } else {
     water = water !== undefined ? water : 0;
-    seeds = seeds !== undefined ? seeds : 0;
     coins = coins !== undefined ? coins : 0;
   }
 
-  const waterMax = 200, seedsMax = 100;
+  const waterMax = 200;
 
   document.getElementById("water-text").innerText = `${water} / ${waterMax} L`;
   document.getElementById("water-bar").style.width = `${Math.min(100, (water / waterMax) * 100)}%`;
 
-  document.getElementById("seeds-text").innerText = `${seeds} / ${seedsMax}`;
-  document.getElementById("seeds-bar").style.width = `${Math.min(100, (seeds / seedsMax) * 100)}%`;
-
   document.getElementById("coins-text").innerText = `${fmt(coins)} Coins`;
 }
 
-// addPlantsToDropdown(plants: list of [name, emoji, cost])
+// addPlantsToDropdown(plants: list of [name, emoji, owned])
+// The Seed Bag: the seeds you own, with how many. Rebuilding it keeps your current pick.
 function addPlantsToDropdown(plants) {
   const select = document.getElementById("crop-selector");
+  const previous = select.value;
   select.innerHTML = "";
-  if (!plants) return;
-  plants.forEach(([name, emoji, cost]) => {
+  if (!plants || plants.length === 0) {
+    const empty = document.createElement("option");
+    empty.value = "";
+    empty.disabled = true;
+    empty.textContent = "No seeds - visit Marco";
+    select.appendChild(empty);
+    select.value = "";
+    return;
+  }
+  plants.forEach(([name, emoji, owned]) => {
     const option = document.createElement("option");
     plantEmoji[name] = emoji;
     option.value = name;
-    option.textContent = `${emoji} ${name} (${fmt(cost)}c)`;
+    option.textContent = `${emoji} ${name} \u00d7${fmt(owned)}`;
     select.appendChild(option);
   });
+  if (previous && plants.some(([name]) => name === previous)) select.value = previous;
 }
 
 // renderPlantBook(rows, unlockedCount, totalCount)
@@ -521,6 +529,52 @@ function updateDay(day) {
   document.getElementById("day-counter").innerText = day;
 }
 
+// updateShop(seedRows, waterPrice, water, waterMax, tonicPrice, tonicRestore, tonicsOwned)
+// seedRows: list of [name, emoji, price, owned, unlocked], cheapest first.
+function updateShop(seedRows, waterPrice, water, waterMax, tonicPrice, tonicRestore, tonicsOwned) {
+  const missing = waterMax - water;
+  document.getElementById("marco-water-info").textContent =
+    `Water: ${water} / ${waterMax} L  -  ${waterPrice} coins per point`;
+  document.getElementById("marco-water-full").textContent =
+    missing > 0 ? `Refill to Full (${fmt(missing * waterPrice)}c)` : "Water is full";
+  document.getElementById("marco-tonic-info").textContent = `+${tonicRestore} stamina  -  ${fmt(tonicPrice)} coins`;
+  document.getElementById("marco-tonic-owned").textContent = `You have ${tonicsOwned}`;
+  document.getElementById("tonic-count").textContent = tonicsOwned;     // the button in the header
+
+  const list = document.getElementById("marco-seeds");
+  list.innerHTML = "";
+  (seedRows || []).forEach(([name, emoji, price, owned, unlocked]) => {
+    const row = document.createElement("div");
+    row.className = "flex items-center gap-3 rounded-xl border px-3 py-2 " +
+      (unlocked ? "border-emerald-900 bg-[#1b2219]" : "border-emerald-950 bg-[#161c14] opacity-50");
+    row.innerHTML = `
+      <span class="text-2xl ${unlocked ? "" : "grayscale"}">${emoji}</span>
+      <div class="flex-1">
+        <div class="text-sm font-bold text-white">${name}${unlocked ? "" : ' <span class="text-xs font-normal text-amber-400/90">locked</span>'}</div>
+        <div class="text-xs text-emerald-300/80">${fmt(price)}c per seed  -  you own ${fmt(owned)}</div>
+      </div>
+      <button class="text-xs font-bold px-3 py-1.5 rounded-lg ${unlocked ? "bg-emerald-700 hover:bg-emerald-600 text-white" : "bg-[#2a3825] text-emerald-400/50 cursor-not-allowed"}" ${unlocked ? "" : "disabled"}>${unlocked ? "Buy" : "Locked"}</button>
+    `;
+    if (unlocked) row.querySelector("button").addEventListener("click", () => marcoBuySeed(name));
+    list.appendChild(row);
+  });
+}
+
+function marcoBuySeed(name) {
+  const typed = parseInt(document.getElementById("marco-seed-qty").value, 10);
+  const qty = Math.max(1, Math.min(999, Number.isFinite(typed) ? typed : 1));
+  callPythonAction("buy_seed_action", name, qty);
+}
+
+// marcoBuyWater(10) buys a preset amount; marcoBuyWater() buys whatever is typed in the box.
+function marcoBuyWater(amount) {
+  const typed = parseInt(document.getElementById("marco-water-amount").value, 10);
+  callPythonAction("buy_water_action", amount !== undefined ? amount : (Number.isFinite(typed) ? typed : 0));
+}
+function marcoBuyWaterFull() { callPythonAction("buy_water_full_action"); }
+function marcoBuyTonic() { callPythonAction("buy_tonic_action"); }
+function useTonic() { callPythonAction("use_tonic_action"); }
+
 // updateInventory(rows: list of [name, emoji, qty, sellPrice])
 function updateInventory(rows) {
   const list = document.getElementById("inventory-list");
@@ -716,7 +770,7 @@ function loadTopic() {
 
 function switchTab(tab) {
   if (tab !== "book") pauseTraversal();
-  ["game", "code", "book", "inventory", "market"].forEach(name => {
+  ["game", "code", "book", "inventory", "market", "marco"].forEach(name => {
     const button = document.getElementById("tab-" + name);
     document.getElementById("view-" + name).classList.toggle("hidden", tab !== name);
     button.classList.toggle("bg-[#283623]", tab === name);
@@ -732,7 +786,7 @@ window.onload = async () => {
   renderActionStack();
 
   // Resources stay at 0 until your Python calls updateResources(...)
-  updateResources(0, 0, 0, 0, 0);
+  updateResources(0, 0, 0, 0);
 
   const select = document.getElementById("topic-selector");
   Object.keys(topicTemplates).forEach(k => {

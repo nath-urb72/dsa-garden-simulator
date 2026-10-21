@@ -69,6 +69,9 @@ body {
           <div id="stamina-bar" class="bg-gradient-to-r from-lime-500 to-emerald-400 h-full rounded-full" style="width: 100%"></div>
         </div>
       </div>
+      <button onclick="useTonic()" title="Use a Stamina Tonic" class="glass-panel px-4 py-2 rounded-xl text-xs font-bold text-emerald-200 hover:text-white flex items-center gap-2">
+        <span>🧪</span> Tonic ×<span id="tonic-count">0</span>
+      </button>
       <button onclick="endDay()" class="glass-panel px-4 py-2 rounded-xl text-xs font-bold text-amber-300 hover:text-amber-100 flex items-center gap-2">
         <i data-lucide="moon" class="w-4 h-4"></i> End Day
       </button>
@@ -94,15 +97,6 @@ body {
         </div>
         <div>
           <div class="flex justify-between text-xs font-semibold">
-            <span class="flex items-center gap-1.5 text-emerald-300">Seed Inventory</span>
-            <span id="seeds-text">0 / 100</span>
-          </div>
-          <div class="w-full bg-[#1b2219] h-2.5 rounded-full overflow-hidden">
-            <div id="seeds-bar" class="bg-gradient-to-r from-emerald-500 to-lime-400 h-full rounded-full" style="width: 0%"></div>
-          </div>
-        </div>
-        <div>
-          <div class="flex justify-between text-xs font-semibold">
             <span class="flex items-center gap-1.5 text-yellow-200">Coins / Dues</span>
             <span id="coins-text" class="text-yellow-200">0 Coins</span>
           </div>
@@ -112,12 +106,13 @@ body {
 
     <!-- CENTER -->
     <section class="lg:col-span-6 flex flex-col gap-4">
-      <div class="flex bg-[#192218] p-1.5 rounded-xl border border-emerald-800/40 w-fit">
+      <div class="flex flex-wrap max-w-full bg-[#192218] p-1.5 rounded-xl border border-emerald-800/40 w-fit">
         <button onclick="switchTab('game')" id="tab-game" class="px-4 py-1.5 rounded-lg text-xs font-bold bg-[#283623] text-emerald-100">Interactive Sanctuary</button>
         <button onclick="switchTab('code')" id="tab-code" class="px-4 py-1.5 rounded-lg text-xs font-bold text-emerald-400/80 hover:text-emerald-100">Student Code Editor</button>
         <button onclick="switchTab('book')" id="tab-book" class="px-4 py-1.5 rounded-lg text-xs font-bold text-emerald-400/80 hover:text-emerald-100">Plant Book</button>
         <button onclick="switchTab('inventory')" id="tab-inventory" class="px-4 py-1.5 rounded-lg text-xs font-bold text-emerald-400/80 hover:text-emerald-100">Inventory</button>
         <button onclick="switchTab('market')" id="tab-market" class="px-4 py-1.5 rounded-lg text-xs font-bold text-emerald-400/80 hover:text-emerald-100">Market</button>
+        <button onclick="switchTab('marco')" id="tab-marco" class="px-4 py-1.5 rounded-lg text-xs font-bold text-emerald-400/80 hover:text-emerald-100">Marco</button>
       </div>
 
       <div id="view-game" class="glass-panel rounded-2xl p-6 min-h-[380px]">
@@ -211,6 +206,46 @@ body {
         <p id="market-empty" class="text-sm text-emerald-300/80 mb-3">Nothing staged for sale.</p>
         <div id="market-list" class="space-y-2 mb-2"></div>
         <p class="text-sm font-bold text-yellow-200">Pending payout: <span id="market-total">0</span> coins</p>
+      </div>
+
+      <div id="view-marco" class="glass-panel rounded-2xl p-6 min-h-[380px] hidden">
+        <div class="mb-4">
+          <h2 class="text-lg font-bold text-white flex items-center gap-2">
+            <i data-lucide="shopping-bag" class="w-5 h-5 text-emerald-400"></i> Merchant Marco
+          </h2>
+          <p class="text-xs text-emerald-300">Seeds, water and tonics for the working gardener. Coins only!</p>
+        </div>
+
+        <h3 class="text-sm font-bold text-emerald-200 mb-1">Water</h3>
+        <p id="marco-water-info" class="text-xs text-emerald-300/80 mb-2">Water: 0 / 200 L</p>
+        <div class="flex flex-wrap items-center gap-2 mb-5">
+          <button onclick="marcoBuyWater(10)" class="text-xs font-bold px-3 py-1.5 rounded-lg bg-[#2a3825] hover:bg-[#34462e] border border-emerald-700 text-emerald-200">+10</button>
+          <button onclick="marcoBuyWater(25)" class="text-xs font-bold px-3 py-1.5 rounded-lg bg-[#2a3825] hover:bg-[#34462e] border border-emerald-700 text-emerald-200">+25</button>
+          <button onclick="marcoBuyWater(50)" class="text-xs font-bold px-3 py-1.5 rounded-lg bg-[#2a3825] hover:bg-[#34462e] border border-emerald-700 text-emerald-200">+50</button>
+          <input id="marco-water-amount" type="number" min="1" max="200" placeholder="Amount" class="w-24 bg-[#1b2219] border border-emerald-700 rounded-lg px-2 py-1.5 text-sm text-emerald-100">
+          <button onclick="marcoBuyWater()" class="text-xs font-bold px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white">Buy</button>
+          <button id="marco-water-full" onclick="marcoBuyWaterFull()" class="text-xs font-bold px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white">Refill to Full</button>
+        </div>
+
+        <h3 class="text-sm font-bold text-emerald-200 mb-2">Stamina Tonic</h3>
+        <div class="flex items-center gap-3 rounded-xl border border-emerald-900 bg-[#1b2219] px-3 py-2 mb-5">
+          <span class="text-2xl">🧪</span>
+          <div class="flex-1">
+            <div class="text-sm font-bold text-white">Stamina Tonic</div>
+            <div id="marco-tonic-info" class="text-xs text-emerald-300/80">+30 stamina</div>
+            <div id="marco-tonic-owned" class="text-xs text-emerald-300/80">You have 0</div>
+          </div>
+          <button onclick="marcoBuyTonic()" class="text-xs font-bold px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white">Buy</button>
+          <button onclick="useTonic()" class="text-xs font-bold px-3 py-1.5 rounded-lg bg-[#2a3825] hover:bg-[#34462e] border border-emerald-700 text-emerald-200">Use</button>
+        </div>
+
+        <div class="flex items-center justify-between mb-2">
+          <h3 class="text-sm font-bold text-emerald-200">Seeds</h3>
+          <label class="text-xs text-emerald-300 flex items-center gap-2">Buy quantity
+            <input id="marco-seed-qty" type="number" min="1" max="999" value="1" class="w-16 bg-[#1b2219] border border-emerald-700 rounded-lg px-2 py-1 text-sm text-emerald-100">
+          </label>
+        </div>
+        <div id="marco-seeds" class="space-y-2"></div>
       </div>
 
           <div id="view-code" class="glass-panel rounded-2xl p-6 flex flex-col flex-grow hidden">

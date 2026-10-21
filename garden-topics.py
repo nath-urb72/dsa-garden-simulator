@@ -256,10 +256,12 @@ class Plant:
 
 
 class Resources:
-    CAPS = {"water": 200, "seeds": 100, "energy": 120, "hope": 100, "coins": None}
+    # There is no shared "seeds" pool any more: seeds are owned per plant
+    # (GardenGame.seed_counts) and bought from Merchant Marco.
+    CAPS = {"water": 200, "energy": 120, "hope": 100, "coins": None}
 
-    def __init__(self, water, seeds, energy, hope, coins):
-        self.values = {"water": water, "seeds": seeds, "energy": energy, "hope": hope, "coins": coins}
+    def __init__(self, water, energy, hope, coins):
+        self.values = {"water": water, "energy": energy, "hope": hope, "coins": coins}
 
     def get(self, key):
         return self.values[key]
@@ -355,13 +357,99 @@ class Market:
         return earned
 
 
+class Merchant:
+    """Merchant Marco: sells seeds, water and a stamina tonic. Coins in, supplies out.
+    A seed costs the plant's own price, and only unlocked plants can be bought."""
+    WATER_PRICE = 2        # coins per point of Water
+    TONIC_PRICE = 30       # coins
+    TONIC_RESTORE = 30     # stamina
+
+    def __init__(self, game):
+        self.game = game
+
+    def seed_rows(self):
+        """Every plant in the game, cheapest first: (name, emoji, price, owned, unlocked)."""
+        unlocked = {plant.name for plant in self.game.catalog}
+        plants = sorted(PLANT_DATA.values(), key=lambda d: d["cost"])
+        return [(d["name"], d["emoji"], d["cost"], self.game.seed_counts.get(d["name"], 0), d["name"] in unlocked)
+                for d in plants]
+
+    def buy_seed(self, name, qty=1):
+        game = self.game
+        qty = max(1, min(int(qty), 999))
+        if name not in PLANT_DATA:
+            return "Marco doesn't sell that."
+        if game.find_plant(name) is None:
+            return f"Marco can't sell {name} seeds until you unlock {name}."
+        total = PLANT_DATA[name]["cost"] * qty
+        coins = game.resources.get("coins")
+        if coins < total:
+            return f"Not enough coins: {qty} {name} seed(s) cost {total:,}c and you have {coins:,}c."
+        game.resources.change("coins", -total)
+        game.seed_counts[name] = game.seed_counts.get(name, 0) + qty
+        stack.push_action(f"Bought {qty} {name} seed(s) for {total:,}c")
+        game.resources.sync()
+        game.refresh_dropdown()
+        game.refresh_shop()
+        return f"Bought {qty} {name} seed(s) for {total:,}c."
+
+    def buy_water(self, amount):
+        game = self.game
+        room = Resources.CAPS["water"] - game.resources.get("water")
+        if room <= 0:
+            return "Your water reserves are already full."
+        wanted = max(0, int(amount))
+        if wanted <= 0:
+            return "Choose how much water to buy."
+        amount = min(wanted, room)          # never buy past the cap
+        cost = amount * self.WATER_PRICE
+        coins = game.resources.get("coins")
+        if coins < cost:
+            return f"Not enough coins: {amount}L of water costs {cost:,}c and you have {coins:,}c."
+        game.resources.change("coins", -cost)
+        game.resources.change("water", amount)
+        stack.push_action(f"Bought {amount}L of water for {cost:,}c")
+        game.resources.sync()
+        game.refresh_shop()
+        note = f" (only {room}L fit)" if wanted > room else ""
+        return f"Bought {amount}L of water for {cost:,}c{note}."
+
+    def buy_water_full(self):
+        return self.buy_water(Resources.CAPS["water"] - self.game.resources.get("water"))
+
+    def buy_stamina_tonic(self):
+        game = self.game
+        coins = game.resources.get("coins")
+        if coins < self.TONIC_PRICE:
+            return f"Not enough coins: a Stamina Tonic costs {self.TONIC_PRICE:,}c and you have {coins:,}c."
+        game.resources.change("coins", -self.TONIC_PRICE)
+        game.stamina_tonics += 1
+        stack.push_action(f"Bought a Stamina Tonic for {self.TONIC_PRICE:,}c")
+        game.resources.sync()
+        game.refresh_shop()
+        return f"Bought a Stamina Tonic for {self.TONIC_PRICE:,}c. You have {game.stamina_tonics}."
+
+    def use_stamina_tonic(self):
+        game = self.game
+        if game.stamina_tonics <= 0:
+            return "You don't have any Stamina Tonics. Marco sells them."
+        if game.stamina >= game.MAX_STAMINA:
+            return "You're already fully rested. Save the tonic for later."
+        gained = min(self.TONIC_RESTORE, game.MAX_STAMINA - game.stamina)
+        game.stamina_tonics -= 1
+        game.stamina += gained
+        stack.push_action(f"Used a Stamina Tonic (+{gained} stamina)")
+        game.sync_stamina()
+        game.refresh_shop()
+        return f"Used a Stamina Tonic: +{gained} stamina."
+
+
 class GardenGame:
     # 10x10 = 100 tiles. Stamina is set so a water-only day can cover about half
     # the garden (50 waterings at 10 stamina each = 500).
     MAX_STAMINA = 500
     STAMINA_COSTS = {"plant": 15, "water": 10, "harvest": 10, "shovel": 10}
     WATER_COST = 10   # Water resource spent per use of the watering can
-    SEEDS_PER_PLANT = 1
 
     def __init__(self, catalog, resources, grid=None):
         self.catalog = catalog
@@ -372,6 +460,11 @@ class GardenGame:
         self.harvest_counts = {}   # name -> lifetime harvest count, used to unlock the next plant
         self.inventory = Inventory()
         self.market = Market()
+        # Seeds owned per plant (a dict = hash table, name -> count). Planting uses
+        # one; buying from Merchant Marco is the only way to get more.
+        self.seed_counts = {}
+        self.stamina_tonics = 0    # bought from Marco, used later for +stamina
+        self.merchant = Merchant(self)
         # Reset to defaults at the start of every end_day(); an event firing during
         # that day's event roll can change them for the day that's about to begin.
         self.stamina_cost_multiplier = 1   # Cold Snap
@@ -388,7 +481,22 @@ class GardenGame:
 
     def add_to_catalog(self, plant):   # O(1) amortized
         self.catalog.append(plant)
+        rebuild_tree = globals().get("_rebuild_price_bst")
+        if rebuild_tree:                         # Topic 5 has run: keep its price tree current
+            globals()["price_bst"] = rebuild_tree()
         self.refresh_dropdown()
+        self.refresh_shop()
+
+    def sorted_catalog(self):
+        """Unlocked plants, cheapest first. Once Topic 5 has run this is an inorder
+        walk of its price tree; before that it is a plain sort."""
+        by_name = {plant.name: plant for plant in self.catalog}
+        tree = globals().get("price_bst")
+        if tree is not None:
+            ordered = [by_name[node.name] for node in tree.inorder() if node.name in by_name]
+            if len(ordered) == len(by_name):     # the tree knows every unlocked plant
+                return ordered
+        return sorted(self.catalog, key=lambda plant: plant.cost)
 
     # ---- stamina ----
     def spend_stamina(self, action):
@@ -410,25 +518,24 @@ class GardenGame:
     def plant_at(self, row, col, plant_name):
         prototype = self.find_plant(plant_name)
         if prototype is None:
+            if not any(self.seed_counts.values()):
+                return "Your Seed Bag is empty. Buy seeds from Merchant Marco."
             return "Pick a seed from the Seed Bag first."
         if not self.grid.in_bounds(row, col):
             return "That tile is outside the garden."
         if not self.grid.is_empty(row, col):
             return f"({row}, {col}) is already planted. Try watering, harvesting, or the shovel."
-        if self.resources.get("coins") < prototype.cost:
-            return f"Not enough coins for {prototype.name} ({prototype.cost:,}c)."
-        if self.resources.get("seeds") < self.SEEDS_PER_PLANT:
-            return "Out of seeds!"
+        if self.seed_counts.get(plant_name, 0) <= 0:
+            return f"You don't have any {plant_name} seeds. Buy more from Merchant Marco."
         stamina_msg = self.spend_stamina("plant")
         if stamina_msg:
             return stamina_msg
 
-        self.resources.change("coins", -prototype.cost)
-        self.resources.change("seeds", -self.SEEDS_PER_PLANT)
+        self.seed_counts[plant_name] -= 1          # a seed is used up; no coins change hands
         self.grid.place(row, col, prototype.clone())
         stack.push_action(f"Planted {prototype.name} at ({row}, {col})")
+        self.refresh_dropdown()                    # the Seed Bag shows how many are left
 
-        self.resources.sync()
         return self._tired_notice() or f"Planted {prototype.name}."
 
     def water_at(self, row, col):
@@ -453,6 +560,7 @@ class GardenGame:
         self.grid.redraw(row, col)
         stack.push_action(f"Watered {plant.name} at ({row}, {col})")
         self.resources.sync()
+        self.refresh_shop()
         return self._tired_notice() or f"Watered {plant.name} - now {plant.stage}."
 
     def harvest_at(self, row, col):
@@ -638,7 +746,14 @@ class GardenGame:
 
     # ---- display refreshers ----
     def refresh_dropdown(self):
-        addPlantsToDropdown([(plant.name, plant.emoji, plant.cost) for plant in self.catalog])
+        """The Seed Bag: only seeds you own, cheapest first, with how many you have."""
+        addPlantsToDropdown([(plant.name, plant.emoji, self.seed_counts.get(plant.name, 0))
+                             for plant in self.sorted_catalog() if self.seed_counts.get(plant.name, 0) > 0])
+
+    def refresh_shop(self):
+        updateShop(self.merchant.seed_rows(),
+                   Merchant.WATER_PRICE, self.resources.get("water"), Resources.CAPS["water"],
+                   Merchant.TONIC_PRICE, Merchant.TONIC_RESTORE, self.stamina_tonics)
 
     def refresh_inventory(self):
         updateInventory(self.inventory.rows())
@@ -671,15 +786,35 @@ def sell_to_market_action(name):
 def end_day_action():
     return game.end_day()
 
+def buy_seed_action(name, qty=1):
+    return game.merchant.buy_seed(name, qty)
+
+def buy_water_action(amount):
+    return game.merchant.buy_water(amount)
+
+def buy_water_full_action():
+    return game.merchant.buy_water_full()
+
+def buy_tonic_action():
+    return game.merchant.buy_stamina_tonic()
+
+def use_tonic_action():
+    return game.merchant.use_stamina_tonic()
+
+
+STARTER_SEEDS = 2    # free seeds of each starter plant, to get the first harvest going
 
 if "game" not in globals():
     starters = [Plant.from_data(name) for name, d in PLANT_DATA.items() if d["unlocked_by_default"]]
     game = GardenGame(
         catalog=starters,
-        resources=Resources(water=200, seeds=90, energy=110, hope=80, coins=999),
+        resources=Resources(water=200, energy=110, hope=80, coins=0),
     )
+    for plant in starters:
+        game.seed_counts[plant.name] = STARTER_SEEDS
 
 game.refresh_dropdown()
+game.refresh_shop()
 game.resources.sync()
 game.sync_stamina()
 game.sync_day()
@@ -949,9 +1084,9 @@ inorder_nodes = price_bst.inorder()
 preorder_nodes = price_bst.preorder()
 postorder_nodes = price_bst.postorder()
 
-# Inorder does real work here: the Seed Bag dropdown is re-sorted cheapest-first,
-# straight from the traversal result - no separate sorting logic needed.
-addPlantsToDropdown([(n.name, PLANT_DATA[n.name]["emoji"], n.cost) for n in inorder_nodes])
+# Inorder does real work here: GardenGame.sorted_catalog() reads this tree with an
+# inorder walk, so the Seed Bag comes out cheapest-first with no separate sorting code.
+game.refresh_dropdown()
 
 print(f"Plant Price BST ready: {len(inorder_nodes)} plants, tree height {price_bst.height()}.\n")
 
