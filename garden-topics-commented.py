@@ -117,6 +117,7 @@ COLOR_HEART = {
 
 # Harvests of the PREVIOUS plant in the same tier needed to unlock the next one.
 UNLOCK_THRESHOLDS = [None, 10, 40, 140, 500]
+Use Control + Shift + m to toggle the tab key moving focus. Alternatively, use esc then tab to move to the next interactive element on the page.
 
 TIER_ORDER = {
     "RED":         ["Tomato", "Apple", "Strawberry", "Chili Pepper", "Cherry"],
@@ -1005,35 +1006,28 @@ if "game" not in globals():
     raise RuntimeError("Run the earlier topics first (Topic 3 sets up PLANT_DATA and the garden). Missing: game")
 
 # ---------------------------------------------------------------------
-# PriceNode: ONE box (node) in the price tree. Holds one plant's price.
+# PriceNode: The class that creates the NODE OBJECTS for the tree.
 # ---------------------------------------------------------------------
 class PriceNode:
-    # __init__ is the constructor: it runs automatically on PriceNode(cost, name).
-    # `self` is the node being created; `cost` and `name` are the inputs.
-    def __init__(self, cost, name):
+    def __init__(self, cost, name): # self is the NODE
         self.cost = cost       # the plant's price (integer): this is the value the tree sorts by
-        self.name = name       # the plant's name (string), e.g. "Tomato"
-        self.left = None       # link to the subtree of CHEAPER plants; None = "nothing here yet"
-        self.right = None      # link to the subtree of EQUAL-or-PRICIER plants; None = empty
+        self.name = name       # the plant's name (string)
+        self.left = None       # link to the subtree of CHEAPER plants; None = points to nothing
+        self.right = None      # link to the subtree of EQUAL-or-PRICIER plants; None = points to nothing
 
 # ---------------------------------------------------------------------
-# PlantPriceBST: the whole tree. It only remembers the top node (root);
+# PlantPriceBST: the actual tree. It only remembers the top node (root);
 # every other node is reachable by following left/right links from it.
 # ---------------------------------------------------------------------
 class PlantPriceBST:
-    """Every unlocked plant, ordered by cost. Ties (two plants at the same cost)
-    chain off to the right. Plants also tend to unlock from cheap to expensive, so
-    new ones keep landing on the right and the tree is biased toward the RIGHT when many
-    plants share a price - which our own starters do, see below."""
 
     def __init__(self):
         self.root = None       # an empty tree has no root; the first insert creates it
 
-    # PUBLIC insert: the method the rest of the program calls.
+    # PUBLIC insert: the method the rest of the program calls (outside code).
     # Inputs: cost (int), name (str). Returns nothing.
     def insert(self, cost, name):   # O(log n) average, O(n) worst case
-        # Hand the work to the recursive helper, starting at the root, and store
-        # whatever comes back as the root. (If the tree was empty, that is the new node.)
+        # calls the _insert(), starts at the root
         self.root = self._insert(self.root, cost, name)
 
     # PRIVATE recursive helper (the leading _ means "internal use only").
@@ -1042,8 +1036,10 @@ class PlantPriceBST:
     def _insert(self, node, cost, name):
         # BASE CASE: we reached an empty spot (None), so this is where the plant belongs.
         if node is None:
-            return PriceNode(cost, name)    # create a new node and give it back to the caller
-        # Compare the new price with this node's price.
+            return PriceNode(cost, name)    # create a new node and return it back to the caller
+        
+        # RECURSIVE CASE: compare the new price with this node's price.
+        # cost = price of new plant (doesn't change) / node.cost = price of the current node (changes each call)
         if cost < node.cost:
             # Cheaper: it belongs somewhere in the LEFT subtree. Recurse into it, then
             # re-attach the result to node.left. This line is the "node mutation":
